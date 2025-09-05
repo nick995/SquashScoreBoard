@@ -1,47 +1,74 @@
-from fastapi import APIRouter
-from app.schemas.match import Match, GameScore
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from app.core.db import get_db
+from app.models.match import Match as MatchModel
+from app.models.gamescore import GameScore as GameScoreModel
+from app.schemas.match import Match as MatchSchema
+from app.utils.scoring import check_winner, calculate_match_points, apply_sub_rule
 
-router = APIRouter()
-matches = {}
+router = APIRouter(prefix="/matches", tags=["matches"])
 
-def check_winner(match: Match) -> Match:
-    team1_wins = 0
-    team2_wins = 0
-    for g in match.games:
-        if (g.team1_points >= 11 or g.team2_points >= 11) and abs(g.team1_points - g.team2_points) >= 2:
-            if g.team1_points > g.team2_points:
-                team1_wins += 1
-            else:
-                team2_wins += 1
-    if team1_wins >= 3:
-        match.winner = match.team1_id
-    elif team2_wins >= 3:
-        match.winner = match.team2_id
+@router.post("/", response_model=MatchSchema)
+def create_match(match: MatchSchema, db: Session = Depends(get_db)):
+    db_match = MatchModel(
+        court=match.court,
+        order=match.order,
+        referee_id=match.referee_id,
+        team1_id=match.team1_id,
+        team2_id=match.team2_id,
+        team1_player_id=match.team1_player_id,
+        team2_player_id=match.team2_player_id,
+    )
+    db.add(db_match)
+    db.commit()
+    db.refresh(db_match)
+
+    # 기본 5게임 생성
+    for i in range(1, 6):
+        db.add(GameScoreModel(match_id=db_match.id, game_number=i))
+    db.commit()
+    db.refresh(db_match)
+
+    return db_match
+
+@router.post("/{match_id}/update/{game_number}")
+def update_score(match_id: int, game_number: int, team1_score: int, team2_score: int, db: Session = Depends(get_db)):
+    match = db.query(MatchModel).filter(MatchModel.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    game = next((g for g in match.games if g.game_number == game_number), None)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    game.team1_score = team1_score
+    game.team2_score = team2_score
+    db.commit()
+
+    # 승자 판정
+    match.winner_team_id = check_winner(match)
+
+    # 점수 계산 + 대체출전 룰 적용
+    pts = calculate_match_points(match)
+    pts = apply_sub_rule(pts, match)
+    match.team1_points, match.team2_points = pts
+    match.score_summary = f"{match.team1_points}-{match.team2_points}"
+
+    # 팀 누적 점수 업데이트
+    if match.winner_team_id:
+        from app.models.team import Team as TeamModel
+        team1 = db.query(TeamModel).get(match.team1_id)
+        team2 = db.query(TeamModel).get(match.team2_id)
+        team1.total_points += match.team1_points
+        team2.total_points += match.team2_points
+
+    db.commit()
+    db.refresh(match)
     return match
 
-def calculate_match_points(match: Match, team1_id: int, team2_id: int):
-    team1_games = sum(1 for g in match.games if g.team1_points > g.team2_points and abs(g.team1_points-g.team2_points) >= 2)
-    team2_games = sum(1 for g in match.games if g.team2_points > g.team1_points and abs(g.team1_points-g.team2_points) >= 2)
-
-    if team1_games == 3:
-        diff = team1_games - team2_games
-        if diff == 3: return (5,0)
-        if diff == 2: return (4,1)
-        if diff == 1: return (3,2)
-    elif team2_games == 3:
-        diff = team2_games - team1_games
-        if diff == 3: return (0,5)
-        if diff == 2: return (1,4)
-        if diff == 1: return (2,3)
-
-    return (0,0)
-
-@router.post("/", response_model=Match)
-def create_match(match: Match):
-    match.games = [GameScore(game_number=i+1) for i in range(5)]
-    matches[match.id] = match
+@router.get("/{match_id}", response_model=MatchSchema)
+def get_match(match_id: int, db: Session = Depends(get_db)):
+    match = db.query(MatchModel).filter(MatchModel.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match not found")
     return match
-
-@router.get("/{match_id}", response_model=Match)
-def get_match(match_id: int):
-    return matches.get(match_id, {"error": "Match not found"})

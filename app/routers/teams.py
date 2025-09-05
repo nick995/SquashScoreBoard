@@ -1,37 +1,65 @@
-from fastapi import APIRouter, HTTPException
-from app.schemas.team import Team
-from app.schemas.user import User
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from app.core.db import get_db
+from app.models.team import Team as TeamModel
+from app.models.user import User as UserModel
+from app.schemas.team import Team as TeamSchema, AddUserToTeam
 
-router = APIRouter()
-teams: dict[int, Team] = {}
+router = APIRouter(prefix="/teams", tags=["Teams"])
 
-@router.post("/", response_model=Team)
-def create_team(team: Team):
-    
-    if team.id in teams:
-        raise HTTPException(status_code=400, detail="Team with this ID already exists")
-    
-    if any(t.name == team.name for t in teams.values()):
+@router.post("/", response_model=TeamSchema)
+def create_team(team: TeamSchema, db: Session = Depends(get_db)):
+    existing = db.query(TeamModel).filter(TeamModel.name == team.name).first()
+    if existing:
         raise HTTPException(status_code=400, detail="Team with this name already exists")
-    teams[team.id] = team
+
+    db_team = TeamModel(name=team.name)
+    db.add(db_team)
+    db.commit()
+    db.refresh(db_team)
+    return db_team
+
+@router.post("/{team_id}/add_user", response_model=TeamSchema)
+def add_user_to_team(team_id: int, payload: AddUserToTeam, db: Session = Depends(get_db)):
+    team = db.query(TeamModel).filter(TeamModel.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    db_user = db.query(UserModel).filter(UserModel.id == payload.user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if db_user.team_id == team_id:
+        raise HTTPException(status_code=400, detail="User already in this team")
+
+    db_user.team_id = team_id
+    db.commit()
+    db.refresh(team)
     return team
 
-@router.post("/{team_id}/add_user", response_model=Team)
-def add_user_to_team(team_id: int, user: User):
-    if team_id not in teams:
+
+@router.post("/{team_id}/add_user_by_name", response_model=TeamSchema)
+def add_user_to_team_by_name(team_id: int, name: str, db: Session = Depends(get_db)):
+    team = db.query(TeamModel).filter(TeamModel.id == team_id).first()
+    if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    team = teams[team_id]
-    if any(u.id == user.id for u in team.members):
-        raise HTTPException(status_code=400, detail="User already in team")
-    team.members.append(user)
+
+    db_user = db.query(UserModel).filter(UserModel.name == name).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if db_user.team_id == team_id:
+        raise HTTPException(status_code=400, detail="User already in this team")
+
+    db_user.team_id = team_id
+    db.commit()
+    db.refresh(team)
     return team
 
-@router.get("/{team_id}", response_model=Team)
-def get_team(team_id: int):
-    if team_id not in teams:
-        raise HTTPException(status_code=404, detail="Team not found")
-    return teams[team_id]
 
-@router.get("/", response_model=list[Team])
-def get_all_teams():
-    return list(teams.values())
+@router.get("/{team_id}", response_model=TeamSchema)
+def get_team(team_id: int, db: Session = Depends(get_db)):
+    team = db.query(TeamModel).filter(TeamModel.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return team

@@ -4,20 +4,18 @@ from fastapi.responses import HTMLResponse
 # 라우터 임포트
 from app.routers import users, teams, matches, team_matches
 
-
 app = FastAPI(
     title="Squash Score Board",
     description="API for recording squash scores and managing tournaments.",
     version="0.1.0",
 )
 
-# 라우터 등록
-app.include_router(users.router, prefix="/users", tags=["Users"])
-app.include_router(teams.router, prefix="/teams", tags=["Teams"])
-app.include_router(matches.router, prefix="/matches", tags=["Matches"])
-app.include_router(team_matches.router, prefix="/team_matches", tags=["Team Matches"])
+# 라우터 등록 (prefix 빼기!)
+app.include_router(users.router)
+app.include_router(teams.router)
+app.include_router(matches.router)
+app.include_router(team_matches.router)
 
-# 루트 페이지 (Swagger 링크 안내)
 @app.get("/", include_in_schema=False)
 def default() -> HTMLResponse:
     return HTMLResponse(
@@ -36,7 +34,6 @@ def default() -> HTMLResponse:
         """,
     )
 
-# 임시 헬스체크 API (Swagger에 엔드포인트가 잘 보이는지 확인용)
 @app.get("/ping", tags=["Health"])
 def ping():
     return {"status": "ok"}
