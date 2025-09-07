@@ -22,12 +22,12 @@ def calculate_match_points(match):
 
 def apply_sub_rule(points, match):
     required_order = match.order  # 경기 순서 (1번/2번/3번)
-    team1_num = match.team1_player.player_number
-    team2_num = match.team2_player.player_number
+    team1_num = getattr(match.team1_player, "player_number", None)
+    team2_num = getattr(match.team2_player, "player_number", None)
 
     t1, t2 = points
-    if team1_num > required_order:
+    if team1_num and required_order and team1_num > required_order:
         t1 = t1 // 2
-    if team2_num > required_order:
+    if team2_num and required_order and team2_num > required_order:
         t2 = t2 // 2
     return (t1, t2)

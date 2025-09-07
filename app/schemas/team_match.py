@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import List, Optional
-from app.schemas.match import Match, GameScore
+from app.schemas.match import Match
+from app.schemas.gamescore import GameScore
 
 class TeamMatch(BaseModel):
     id: int

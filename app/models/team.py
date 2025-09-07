@@ -9,3 +9,4 @@ class Team(Base):
     name = Column(String, nullable=False, unique=True)
 
     members = relationship("User", back_populates="team")
+    total_points = Column(Integer, default=0)

@@ -4,9 +4,31 @@ from app.core.db import get_db
 from app.models.match import Match as MatchModel
 from app.models.gamescore import GameScore as GameScoreModel
 from app.schemas.match import Match as MatchSchema
+from app.models.match_referee import MatchReferee
 from app.utils.scoring import check_winner, calculate_match_points, apply_sub_rule
 
 router = APIRouter(prefix="/matches", tags=["matches"])
+
+@router.get("/", response_model=list[MatchSchema])
+def list_matches(db: Session = Depends(get_db)):
+    items = db.query(MatchModel).all()
+    results: list[MatchSchema] = []
+    for m in items:
+        results.append(MatchSchema(
+            id=m.id,
+            court=m.court,
+            order=m.order,
+            referee_id=m.referee_id,
+            referee_ids=[mr.user_id for mr in (m.referees or [])],
+            team1_id=m.team1_id,
+            team2_id=m.team2_id,
+            team1_player_id=m.team1_player_id,
+            team2_player_id=m.team2_player_id,
+            winner_team_id=m.winner_team_id,
+            score_summary=m.score_summary,
+            games=m.games,
+        ))
+    return results
 
 @router.post("/", response_model=MatchSchema)
 def create_match(match: MatchSchema, db: Session = Depends(get_db)):
@@ -22,6 +44,13 @@ def create_match(match: MatchSchema, db: Session = Depends(get_db)):
     db.add(db_match)
     db.commit()
     db.refresh(db_match)
+
+    # referees (multiple)
+    if match.referee_ids:
+        for uid in match.referee_ids:
+            db.add(MatchReferee(match_id=db_match.id, user_id=uid))
+        db.commit()
+        db.refresh(db_match)
 
     # 기본 5게임 생성
     for i in range(1, 6):
@@ -57,10 +86,11 @@ def update_score(match_id: int, game_number: int, team1_score: int, team2_score:
     # 팀 누적 점수 업데이트
     if match.winner_team_id:
         from app.models.team import Team as TeamModel
-        team1 = db.query(TeamModel).get(match.team1_id)
-        team2 = db.query(TeamModel).get(match.team2_id)
-        team1.total_points += match.team1_points
-        team2.total_points += match.team2_points
+        team1 = db.query(TeamModel).filter(TeamModel.id == match.team1_id).first()
+        team2 = db.query(TeamModel).filter(TeamModel.id == match.team2_id).first()
+        if team1 and team2:
+            team1.total_points = (team1.total_points or 0) + (match.team1_points or 0)
+            team2.total_points = (team2.total_points or 0) + (match.team2_points or 0)
 
     db.commit()
     db.refresh(match)
@@ -68,7 +98,20 @@ def update_score(match_id: int, game_number: int, team1_score: int, team2_score:
 
 @router.get("/{match_id}", response_model=MatchSchema)
 def get_match(match_id: int, db: Session = Depends(get_db)):
-    match = db.query(MatchModel).filter(MatchModel.id == match_id).first()
-    if not match:
+    m = db.query(MatchModel).filter(MatchModel.id == match_id).first()
+    if not m:
         raise HTTPException(status_code=404, detail="Match not found")
-    return match
+    return MatchSchema(
+        id=m.id,
+        court=m.court,
+        order=m.order,
+        referee_id=m.referee_id,
+        referee_ids=[mr.user_id for mr in (m.referees or [])],
+        team1_id=m.team1_id,
+        team2_id=m.team2_id,
+        team1_player_id=m.team1_player_id,
+        team2_player_id=m.team2_player_id,
+        winner_team_id=m.winner_team_id,
+        score_summary=m.score_summary,
+        games=m.games,
+    )

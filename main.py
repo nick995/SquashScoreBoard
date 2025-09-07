@@ -1,20 +1,33 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 # 라우터 임포트
-from app.routers import users, teams, matches, team_matches
+from app.routers import users, teams, matches, team_matches, events
 
 app = FastAPI(
-    title="Squash Score Board",
-    description="API for recording squash scores and managing tournaments.",
+    title="Squashworks Club API",
+    description="APIs for Squashworks Club: teams, players, matches, and events.",
     version="0.1.0",
 )
+origins = [
+    "http://localhost:5173",   # React dev 서버
+    "http://127.0.0.1:5173",
+]
 
-# 라우터 등록 (prefix 빼기!)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,          # 허용할 도메인
+    allow_credentials=True,
+    allow_methods=["*"],            # GET, POST, PUT, DELETE 전부 허용
+    allow_headers=["*"],            # 모든 헤더 허용
+)
+
 app.include_router(users.router)
 app.include_router(teams.router)
 app.include_router(matches.router)
 app.include_router(team_matches.router)
+app.include_router(events.router)
 
 @app.get("/", include_in_schema=False)
 def default() -> HTMLResponse:

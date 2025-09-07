@@ -8,4 +8,4 @@ class GameScore(BaseModel):
     team2_score: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
