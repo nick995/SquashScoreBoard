@@ -21,13 +21,38 @@ def calculate_match_points(match):
     return (0,0)
 
 def apply_sub_rule(points, match):
-    required_order = match.order  # 경기 순서 (1번/2번/3번)
-    team1_num = getattr(match.team1_player, "player_number", None)
-    team2_num = getattr(match.team2_player, "player_number", None)
+    """
+    Apply substitution and lineup-order adjustments to match points.
+
+    Rules:
+    - If a side fields a player from a different team (cross-team substitute),
+      that side's points are halved.
+    - Additionally, if a side's player_number is higher than the required order
+      (i.e., a lower-skilled player substituted up within the same team),
+      that side's points are halved.
+    """
+    required_order = match.order
+    t1_player = getattr(match, "team1_player", None)
+    t2_player = getattr(match, "team2_player", None)
+
+    t1_num = getattr(t1_player, "player_number", None)
+    t2_num = getattr(t2_player, "player_number", None)
+
+    t1_team = getattr(t1_player, "team_id", None)
+    t2_team = getattr(t2_player, "team_id", None)
 
     t1, t2 = points
-    if team1_num and required_order and team1_num > required_order:
+
+    # Cross-team substitution halves that side's points
+    if t1_player and t1_team is not None and t1_team != getattr(match, "team1_id", None):
         t1 = t1 // 2
-    if team2_num and required_order and team2_num > required_order:
+    if t2_player and t2_team is not None and t2_team != getattr(match, "team2_id", None):
         t2 = t2 // 2
+
+    # Same-team but out-of-order (player_number > required order)
+    if t1_num and required_order and t1_num > required_order:
+        t1 = t1 // 2
+    if t2_num and required_order and t2_num > required_order:
+        t2 = t2 // 2
+
     return (t1, t2)

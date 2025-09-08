@@ -8,7 +8,11 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 @router.post("/", response_model=MatchEventSchema)
 def create_event(event: MatchEventSchema, db: Session = Depends(get_db)):
-    db_event = MatchEventModel(**event.dict())
+    # Ensure non-null game_number; use 0 when not specified (match-level event)
+    payload = event.dict()
+    if payload.get("game_number") is None:
+        payload["game_number"] = 0
+    db_event = MatchEventModel(**payload)
     db.add(db_event)
     db.commit()
     db.refresh(db_event)

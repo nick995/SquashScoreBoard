@@ -18,3 +18,14 @@ class Match(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class MatchUpdate(BaseModel):
+    court: Optional[str] = None
+    order: Optional[int] = None
+    referee_id: Optional[int] = None
+    referee_ids: Optional[List[int]] = None
+    team1_id: Optional[int] = None
+    team2_id: Optional[int] = None
+    team1_player_id: Optional[int] = None
+    team2_player_id: Optional[int] = None

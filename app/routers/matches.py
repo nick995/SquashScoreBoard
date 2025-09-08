@@ -3,13 +3,15 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.models.match import Match as MatchModel
 from app.models.gamescore import GameScore as GameScoreModel
-from app.schemas.match import Match as MatchSchema
+from app.schemas.match import Match as MatchSchema, MatchUpdate
 from app.models.match_referee import MatchReferee
+from app.models.user import User as UserModel
 from app.utils.scoring import check_winner, calculate_match_points, apply_sub_rule
 
 router = APIRouter(prefix="/matches", tags=["matches"])
 
 @router.get("/", response_model=list[MatchSchema])
+@router.get("", response_model=list[MatchSchema])
 def list_matches(db: Session = Depends(get_db)):
     items = db.query(MatchModel).all()
     results: list[MatchSchema] = []
@@ -31,15 +33,37 @@ def list_matches(db: Session = Depends(get_db)):
     return results
 
 @router.post("/", response_model=MatchSchema)
+@router.post("", response_model=MatchSchema)
 def create_match(match: MatchSchema, db: Session = Depends(get_db)):
+    # Auto-pair players by lineup number when not explicitly provided
+    team1_player_id = match.team1_player_id
+    team2_player_id = match.team2_player_id
+
+    if (team1_player_id is None or team2_player_id is None) and match.order is not None:
+        # Find players whose player_number matches the match order for each team
+        if team1_player_id is None:
+            t1_player = (
+                db.query(UserModel)
+                .filter(UserModel.team_id == match.team1_id, UserModel.player_number == match.order)
+                .first()
+            )
+            team1_player_id = t1_player.id if t1_player else None
+        if team2_player_id is None:
+            t2_player = (
+                db.query(UserModel)
+                .filter(UserModel.team_id == match.team2_id, UserModel.player_number == match.order)
+                .first()
+            )
+            team2_player_id = t2_player.id if t2_player else None
+
     db_match = MatchModel(
         court=match.court,
         order=match.order,
         referee_id=match.referee_id,
         team1_id=match.team1_id,
         team2_id=match.team2_id,
-        team1_player_id=match.team1_player_id,
-        team2_player_id=match.team2_player_id,
+        team1_player_id=team1_player_id,
+        team2_player_id=team2_player_id,
     )
     db.add(db_match)
     db.commit()
@@ -115,3 +139,57 @@ def get_match(match_id: int, db: Session = Depends(get_db)):
         score_summary=m.score_summary,
         games=m.games,
     )
+
+
+@router.put("/{match_id}", response_model=MatchSchema)
+def update_match(match_id: int, payload: MatchUpdate, db: Session = Depends(get_db)):
+    m = db.query(MatchModel).filter(MatchModel.id == match_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    # simple field updates
+    for field in ["court", "order", "referee_id", "team1_id", "team2_id", "team1_player_id", "team2_player_id"]:
+        val = getattr(payload, field, None)
+        if val is not None:
+            setattr(m, field, val)
+
+    db.commit()
+    db.refresh(m)
+
+    # update multiple referees if provided
+    if payload.referee_ids is not None:
+        # clear current
+        db.query(MatchReferee).filter(MatchReferee.match_id == m.id).delete()
+        db.commit()
+        for uid in payload.referee_ids:
+            db.add(MatchReferee(match_id=m.id, user_id=uid))
+        db.commit()
+        db.refresh(m)
+
+    return MatchSchema(
+        id=m.id,
+        court=m.court,
+        order=m.order,
+        referee_id=m.referee_id,
+        referee_ids=[mr.user_id for mr in (m.referees or [])],
+        team1_id=m.team1_id,
+        team2_id=m.team2_id,
+        team1_player_id=m.team1_player_id,
+        team2_player_id=m.team2_player_id,
+        winner_team_id=m.winner_team_id,
+        score_summary=m.score_summary,
+        games=m.games,
+    )
+
+
+@router.delete("/{match_id}")
+def delete_match(match_id: int, db: Session = Depends(get_db)):
+    m = db.query(MatchModel).filter(MatchModel.id == match_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Match not found")
+    # delete associated game scores and referees first
+    db.query(GameScoreModel).filter(GameScoreModel.match_id == match_id).delete()
+    db.query(MatchReferee).filter(MatchReferee.match_id == match_id).delete()
+    db.delete(m)
+    db.commit()
+    return {"status": "ok"}

@@ -11,6 +11,8 @@ export default function Matches() {
   const [refOptions, setRefOptions] = useState([]);
   const [refLoading, setRefLoading] = useState(false);
   const navigate = useNavigate();
+  const [allowSub1, setAllowSub1] = useState(false);
+  const [allowSub2, setAllowSub2] = useState(false);
 
   const load = async () => {
     // Load endpoints independently so one failure doesn't block others
@@ -40,6 +42,8 @@ export default function Matches() {
   useEffect(() => {
     load().catch(console.error);
   }, []);
+
+  // Pairing generator removed
 
   // Referee search by name
   useEffect(() => {
@@ -74,6 +78,7 @@ export default function Matches() {
   };
 
   const teamMembers = (teamId) => users.filter(u => String(u.team_id ?? "") === String(teamId ?? ""));
+  const playersFor = (teamId, allowSub) => allowSub ? users : teamMembers(teamId);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -81,11 +86,11 @@ export default function Matches() {
       const t1 = Number(form.team1_id);
       const t2 = Number(form.team2_id);
       if (!t1 || !t2 || t1 === t2) { alert("Pick two different teams"); return; }
-      if (form.team1_player_id && !teamMembers(t1).some(u => Number(u.id) === Number(form.team1_player_id))) {
+      if (!allowSub1 && form.team1_player_id && !teamMembers(t1).some(u => Number(u.id) === Number(form.team1_player_id))) {
         alert("Team 1 Player must belong to Team 1");
         return;
       }
-      if (form.team2_player_id && !teamMembers(t2).some(u => Number(u.id) === Number(form.team2_player_id))) {
+      if (!allowSub2 && form.team2_player_id && !teamMembers(t2).some(u => Number(u.id) === Number(form.team2_player_id))) {
         alert("Team 2 Player must belong to Team 2");
         return;
       }
@@ -108,9 +113,18 @@ export default function Matches() {
   };
 
   const recent = useMemo(() => [...matches].sort((a,b)=>b.id-a.id).slice(0,10), [matches]);
+  const teamName = (tid) => teams.find(t => Number(t.id) === Number(tid))?.name || `Team ${tid}`;
+  const userById = (uid) => users.find(u => Number(u.id) === Number(uid));
+  const userLabel = (uid, fallbackTeamId, order) => {
+    const u = userById(uid);
+    if (u) return `${u.name} #${u.player_number}`;
+    return `${teamName(fallbackTeamId)} #${order ?? '-'}`;
+  };
 
   return (
     <div className="grid">
+      {/* Pairing generator removed */}
+
       <div className="card">
         <h2>Create Match</h2>
         <form onSubmit={handleCreate} className="grid" style={{gap:12}}>
@@ -145,15 +159,23 @@ export default function Matches() {
               <label className="label">Team 1 Player</label>
               <select className="select" value={form.team1_player_id} onChange={e=>setForm({...form, team1_player_id:e.target.value})}>
                 <option value="">Select player</option>
-                {teamMembers(form.team1_id).map(u=> <option key={u.id} value={u.id}>{u.name} #{u.player_number}</option>)}
+                {playersFor(form.team1_id, allowSub1).map(u=> <option key={u.id} value={u.id}>{u.name} #{u.player_number}{u.team_id? ` • T${u.team_id}`:''}</option>)}
               </select>
+              <label style={{display:'flex', alignItems:'center', gap:6, marginTop:6}}>
+                <input type="checkbox" checked={allowSub1} onChange={e=>setAllowSub1(e.target.checked)} />
+                <span className="muted" style={{fontSize:12}}>Substitute (allow any player)</span>
+              </label>
             </div>
             <div>
               <label className="label">Team 2 Player</label>
               <select className="select" value={form.team2_player_id} onChange={e=>setForm({...form, team2_player_id:e.target.value})}>
                 <option value="">Select player</option>
-                {teamMembers(form.team2_id).map(u=> <option key={u.id} value={u.id}>{u.name} #{u.player_number}</option>)}
+                {playersFor(form.team2_id, allowSub2).map(u=> <option key={u.id} value={u.id}>{u.name} #{u.player_number}{u.team_id? ` • T${u.team_id}`:''}</option>)}
               </select>
+              <label style={{display:'flex', alignItems:'center', gap:6, marginTop:6}}>
+                <input type="checkbox" checked={allowSub2} onChange={e=>setAllowSub2(e.target.checked)} />
+                <span className="muted" style={{fontSize:12}}>Substitute (allow any player)</span>
+              </label>
             </div>
           </div>
           <div className="muted" style={{fontSize:12}}>
@@ -205,12 +227,17 @@ export default function Matches() {
         ) : (
           <ul style={{margin:0, padding:0, listStyle:'none'}}>
             {recent.map(m => (
-              <li key={m.id} style={{display:'flex', justifyContent:'space-between', padding:'10px 0', borderBottom:'1px solid var(--border)'}}>
+              <li key={m.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 0', borderBottom:'1px solid var(--border)'}}>
                 <div>
-                  <div style={{fontWeight:600}}>Match #{m.id} {m.court ? `• ${m.court}` : ''}</div>
-                  <div className="muted" style={{fontSize:13}}>Teams: {m.team1_id} vs {m.team2_id} {m.score_summary ? `• ${m.score_summary}` : ''}</div>
+                  <div style={{fontWeight:600}}>#{m.order ?? '-'} {userLabel(m.team1_player_id, m.team1_id, m.order)} vs {userLabel(m.team2_player_id, m.team2_id, m.order)}</div>
+                  <div className="muted" style={{fontSize:13}}>
+                    Match #{m.id} {m.court ? `• ${m.court}` : ''} • {teamName(m.team1_id)} vs {teamName(m.team2_id)} {m.score_summary ? `• ${m.score_summary}` : ''}
+                  </div>
                 </div>
-                <Link className="btn" to={`/matches/${m.id}`}>Open</Link>
+                <div style={{display:'flex', gap:8}}>
+                  <Link className="btn" to={`/matches/${m.id}`}>Details</Link>
+                  <Link className="btn btn-primary" to={`/matches/${m.id}/scoreboard`}>Score</Link>
+                </div>
               </li>
             ))}
           </ul>

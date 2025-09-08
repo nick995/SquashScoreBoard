@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from app.schemas.user import User
 
 class Team(BaseModel):
@@ -24,3 +24,6 @@ class TeamBasic(BaseModel):
 
     class Config:
         from_attributes = True
+
+class TeamUpdate(BaseModel):
+    name: Optional[str] = None

@@ -1,7 +1,5 @@
 from fastapi import APIRouter
 from app.schemas.team_match import TeamMatch
-from app.schemas.match import Match
-from app.schemas.gamescore import GameScore
 from app.utils.scoring import check_winner, calculate_match_points
 
 router = APIRouter(prefix="/team_matches", tags=["team_matches"])
@@ -9,17 +7,8 @@ TEAM_MATCHES_STORE = {}
 
 @router.post("/", response_model=TeamMatch)
 def create_team_match(tm: TeamMatch):
-    tm.matches = [
-        Match(
-            id=i+1,
-            team1_id=tm.team1_id,
-            team2_id=tm.team2_id,
-            team1_player_number=i+1,
-            team2_player_number=i+1,
-            games=[GameScore(game_number=g+1) for g in range(5)]
-        )
-        for i in range(4)
-    ]
+    # Keep simple in-memory structure without auto-generation
+    tm.matches = []
     TEAM_MATCHES_STORE[tm.id] = tm
     return tm
 

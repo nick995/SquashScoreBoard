@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # 라우터 임포트
 from app.routers import users, teams, matches, team_matches, events
+from app.core.db import engine
 
 app = FastAPI(
     title="Squashworks Club API",
@@ -50,3 +51,11 @@ def default() -> HTMLResponse:
 @app.get("/ping", tags=["Health"])
 def ping():
     return {"status": "ok"}
+
+@app.on_event("shutdown")
+def on_shutdown():
+    # Dispose pooled DB connections to avoid lingering sessions on reload/stop
+    try:
+        engine.dispose()
+    except Exception:
+        pass

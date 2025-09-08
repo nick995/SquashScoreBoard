@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.models.team import Team as TeamModel
 from app.models.user import User as UserModel
-from app.schemas.team import Team as TeamSchema, AddUserToTeam, TeamCreate, TeamBasic
+from app.schemas.team import Team as TeamSchema, AddUserToTeam, TeamCreate, TeamBasic, TeamUpdate
 
 router = APIRouter(prefix="/teams", tags=["Teams"])
 
@@ -73,3 +73,33 @@ def get_team(team_id: int, db: Session = Depends(get_db)):
 @router.get("", response_model=list[TeamBasic])
 def get_teams(db: Session = Depends(get_db)):
     return db.query(TeamModel).all()
+
+
+@router.put("/{team_id}", response_model=TeamSchema)
+def update_team(team_id: int, payload: TeamUpdate, db: Session = Depends(get_db)):
+    team = db.query(TeamModel).filter(TeamModel.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    if payload.name is not None:
+        # check unique name
+        existing = db.query(TeamModel).filter(TeamModel.name == payload.name, TeamModel.id != team_id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Team with this name already exists")
+        team.name = payload.name
+    db.commit()
+    db.refresh(team)
+    return team
+
+
+@router.delete("/{team_id}")
+def delete_team(team_id: int, db: Session = Depends(get_db)):
+    team = db.query(TeamModel).filter(TeamModel.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    # prevent deletion if there are members
+    has_member = db.query(UserModel).filter(UserModel.team_id == team_id).first() is not None
+    if has_member:
+        raise HTTPException(status_code=400, detail="Cannot delete team with members. Remove or reassign members first.")
+    db.delete(team)
+    db.commit()
+    return {"status": "ok"}

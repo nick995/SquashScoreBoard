@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 
 class MatchEvent(BaseModel):
     id: int | None = None
@@ -7,7 +8,8 @@ class MatchEvent(BaseModel):
     event_type: str
     team_id: Optional[int] = None
     player_id: Optional[int] = None
-    timestamp: Optional[str] = None
+    game_number: Optional[int] = None
+    timestamp: Optional[datetime] = None
 
     class Config:
         from_attributes = True

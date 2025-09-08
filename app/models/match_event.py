@@ -10,6 +10,7 @@ class MatchEvent(Base):
     event_type = Column(String, nullable=False)
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
     player_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    game_number = Column(Integer, nullable=False, default=0)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
     match = relationship("Match")

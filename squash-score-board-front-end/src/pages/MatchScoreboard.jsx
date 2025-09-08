@@ -1,238 +1,356 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 import client from "../../api/client";
 
+// CSS‑first, tidy scoreboard implementing explicit serve logic
+// - Server wins: next rally starts on opposite box → record n+Opposite
+// - Handout: winner serves from their preferred box → record n+Pref
+// - Center timeline: strict order, left/right offset by winner side
+
 export default function MatchScoreboard() {
+  // Route param
   const { id } = useParams();
   const matchId = Number(id);
-  const [match, setMatch] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [teams, setTeams] = useState([]);
-  const [currentGame, setCurrentGame] = useState(1);
-  const [local, setLocal] = useState({ t1: 0, t2: 0 });
-  const [stack, setStack] = useState([]); // history for undo
-  const [serverTeam, setServerTeam] = useState('t1');
-  const [serveBox, setServeBox] = useState({ t1: 'R', t2: 'R' });
-  const [showWinModal, setShowWinModal] = useState(false);
-  const [winSide, setWinSide] = useState(null);
-  const [timer, setTimer] = useState(0); // seconds remaining
-  const timerRef = useRef(null);
-  const [timeline, setTimeline] = useState({ 1: [], 2: [], 3: [], 4: [], 5: [] });
-  const [gameConfig, setGameConfig] = useState({ 1:{server:'t1', box:'R'}, 2:{server:'t1', box:'R'}, 3:{server:'t1', box:'R'}, 4:{server:'t1', box:'R'}, 5:{server:'t1', box:'R'} });
 
-  const load = async () => {
-    const [m, u, t] = await Promise.all([
-      client.get(`/matches/${matchId}`),
-      client.get(`/users`).catch(() => ({ data: [] })),
-      client.get(`/teams`).catch(() => ({ data: [] })),
-    ]);
-    setMatch(m.data);
-    setUsers(u.data || []);
-    setTeams(t.data || []);
-    const g = (m.data.games || []).find(x => x.game_number === currentGame);
-    setLocal({ t1: g?.team1_score ?? 0, t2: g?.team2_score ?? 0 });
-    setStack([]);
-  };
+  // Names (loaded from API)
+  const [p1Name, setP1Name] = useState("Player 1");
+  const [p2Name, setP2Name] = useState("Player 2");
 
-  useEffect(() => { load().catch(console.error); }, [matchId]);
-  useEffect(() => {
-    if (!match) return;
-    const g = (match.games || []).find(x => x.game_number === currentGame);
-    setLocal({ t1: g?.team1_score ?? 0, t2: g?.team2_score ?? 0 });
-    setStack([]);
-    const cfg = gameConfig[currentGame] || { server: 't1', box: 'R' };
-    setServerTeam(cfg.server);
-    setServeBox({ t1:'R', t2:'R', [cfg.server]: cfg.box });
-  }, [currentGame]);
+  // Scores and counts per side
+  const [score, setScore] = useState({ p1: 0, p2: 0 });
+  const [counts, setCounts] = useState({ p1: 0, p2: 0 });
 
-  const teamName = (tid) => teams.find(t => Number(t.id) === Number(tid))?.name || `Team ${tid}`;
-  const userName = (uid) => users.find(u => Number(u.id) === Number(uid))?.name;
-  const leftLabel = userName(match?.team1_player_id) || teamName(match?.team1_id);
-  const rightLabel = userName(match?.team2_player_id) || teamName(match?.team2_id);
+  // Serve state
+  const [server, setServer] = useState("p1"); // 'p1' | 'p2'
+  const [box, setBox] = useState({ p1: "R", p2: "R" }); // current box for each when serving next
+  const [pref, setPref] = useState({ p1: "R", p2: "R" }); // preferred starting box after handout
 
-  const isGameDecided = (a, b) => {
-    const max = Math.max(a, b);
-    const min = Math.min(a, b);
-    return max >= 11 && max - min >= 2;
-  };
+  // Timeline sequence (center), strict order
+  const [seq, setSeq] = useState([]); // { side: 'p1'|'p2', box: 'R'|'L', n: number }
 
-  const addPoint = async (side) => {
-    // snapshot before changing serve/box so undo can restore correctly
-    const prevServer = serverTeam;
-    const prevServeBox = { ...serveBox };
-    const oldScores = { ...local };
-    const newScores = { ...oldScores, [side]: oldScores[side] + 1 };
+  // Game/match state
+  const [gameNumber, setGameNumber] = useState(1); // 1..5
+  const [gamesWon, setGamesWon] = useState({ p1: 0, p2: 0 });
+  const [games, setGames] = useState([]); // [{ g, p1, p2, winner }]
+  const [matchOver, setMatchOver] = useState(false);
+  const MAX_GAMES = 5;
+  const POINTS_TO_WIN = 11; // win by 2
 
-    setLocal(newScores);
-    setStack(st => [...st, { side, serverTeam: prevServer, serveBox: prevServeBox }]);
+  // Modal to set initial server and side
+  const [showStart, setShowStart] = useState(true);
+  const [startServer, setStartServer] = useState("p1");
+  const [startBox, setStartBox] = useState("R");
+  const [startMark, setStartMark] = useState(null); // 'R' | 'L'
 
-    // Append to visual timeline
-    setTimeline(tl => {
-      const arr = tl[currentGame] ? [...tl[currentGame]] : [];
-      const scoreShown = side === 't1' ? newScores.t1 : newScores.t2;
-      // Show the server/box for the NEXT rally (post-rally state)
-      let nextServer = prevServer;
-      let nextBox = prevServeBox[prevServer];
-      if (side === prevServer) {
-        // server keeps, toggles box
-        nextServer = prevServer;
-        nextBox = prevServeBox[prevServer] === 'L' ? 'R' : 'L';
-      } else {
-        // handout: receiver becomes server at Right box by default
-        nextServer = side;
-        nextBox = 'R';
-      }
-      arr.push({ n: arr.length + 1, score: scoreShown, winner: side, server: nextServer, box: nextBox });
-      return { ...tl, [currentGame]: arr };
-    });
-
-    // PAR to 11: server holds and alternates box if they win, otherwise handout to receiver (server switches), default to Right box
-    if (side === prevServer) {
-      setServeBox(prev => ({ ...prev, [side]: prev[side] === 'L' ? 'R' : 'L' }));
-    } else {
-      setServerTeam(side);
-      setServeBox(prev => ({ ...prev, [side]: 'R' }));
-    }
-    // Try to log event; ignore failures
-    try { await client.post(`/events/`, { match_id: matchId, event_type: 'point', team_id: side === 't1' ? match.team1_id : match.team2_id }); } catch {}
-
-    // Check win condition asynchronously after state ticks
-    setTimeout(() => {
-      setLocal(curr => {
-        if (isGameDecided(curr.t1, curr.t2)) {
-          const winner = curr.t1 > curr.t2 ? 't1' : 't2';
-          setWinSide(winner);
-          setShowWinModal(true);
-        }
-        return curr;
-      });
-    }, 0);
-  };
-
+  // Undo stack (full snapshot)
+  const [stack, setStack] = useState([]);
+  const snap = () => setStack((s) => [...s, JSON.stringify({ score, counts, server, box, pref, seq, startMark })]);
   const undo = () => {
-    setStack(st => {
-      const copy = [...st];
-      const last = copy.pop();
-      if (!last) return st;
-      setLocal(s => ({ ...s, [last.side]: Math.max(0, s[last.side] - 1) }));
-      // restore previous server and boxes snapshot
-      setServerTeam(last.serverTeam);
-      setServeBox(last.serveBox);
-      // remove last timeline item for current game
-      setTimeline(tl => {
-        const arr = tl[currentGame] ? [...tl[currentGame]] : [];
-        arr.pop();
-        return { ...tl, [currentGame]: arr };
-      });
+    setStack((s) => {
+      if (!s.length) return s;
+      const copy = [...s];
+      const last = JSON.parse(copy.pop());
+      setScore(last.score);
+      setCounts(last.counts);
+      setServer(last.server);
+      setBox(last.box);
+      setPref(last.pref);
+      setSeq(last.seq);
+      setStartMark(last.startMark);
       return copy;
     });
   };
-  const save = async () => {
+
+  const opp = (b) => (b === "R" ? "L" : "R");
+
+  const isGameOver = (s) => {
+    const a = s.p1, b = s.p2;
+    if (a >= POINTS_TO_WIN || b >= POINTS_TO_WIN) {
+      if (Math.abs(a - b) >= 2) return a > b ? 'p1' : 'p2';
+    }
+    return null;
+  };
+
+  const postGameToServer = async (g, p1, p2) => {
     try {
-      await client.post(`/matches/${matchId}/update/${currentGame}`, null, { params: { team1_score: local.t1, team2_score: local.t2 } });
-      const m = await client.get(`/matches/${matchId}`);
-      setMatch(m.data);
-      setStack([]);
+      if (!Number.isNaN(matchId)) {
+        await client.post(`/matches/${matchId}/update/${g}`, null, { params: { team1_score: p1, team2_score: p2 } });
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to post game score', e);
     }
   };
 
-  const startTimer = (seconds=120) => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setTimer(seconds);
-    timerRef.current = setInterval(() => {
-      setTimer(prev => {
-        if (prev <= 1) { clearInterval(timerRef.current); return 0; }
-        return prev - 1;
+  const startNextGame = (winner) => {
+    setGameNumber((gn) => gn + 1);
+    // Winner of previous game serves next; start on preferred side
+    const nextBox = pref[winner] || 'R';
+    // Preselect next server/box and show start modal for confirmation
+    setStartServer(winner);
+    setStartBox(nextBox);
+    setServer(winner);
+    setBox((b) => ({ ...b, [winner]: nextBox }));
+    setStartMark(null);
+    setShowStart(true);
+    // reset rally state
+    setScore({ p1: 0, p2: 0 });
+    setCounts({ p1: 0, p2: 0 });
+    setSeq([]);
+  };
+
+  // Load player names for this match
+  useEffect(() => {
+    let active = true;
+    const fetchNames = async () => {
+      try {
+        const [mRes, uRes] = await Promise.all([
+          client.get(`/matches/${matchId}`),
+          client.get(`/users`).catch(() => ({ data: [] })),
+        ]);
+        const m = mRes.data || {};
+        const users = uRes.data || [];
+        const findById = (uid) => users.find((u) => Number(u.id) === Number(uid));
+        const findByTeamOrder = (teamId, order) => users.find((u) => Number(u.team_id) === Number(teamId) && Number(u.player_number) === Number(order));
+
+        // Player 1 (team1)
+        let p1 = findById(m.team1_player_id)?.name;
+        if (!p1 && m.team1_id && m.order) p1 = findByTeamOrder(m.team1_id, m.order)?.name;
+        // Player 2 (team2)
+        let p2 = findById(m.team2_player_id)?.name;
+        if (!p2 && m.team2_id && m.order) p2 = findByTeamOrder(m.team2_id, m.order)?.name;
+
+        // Compute game progress from backend games
+        const sorted = (m.games || []).slice().sort((a, b) => (a.game_number || 0) - (b.game_number || 0));
+        let gw = { p1: 0, p2: 0 };
+        let finished = [];
+        let currentG = 1;
+        let lastWinner = null;
+        let foundCurrent = false;
+        let currP1s = 0, currP2s = 0;
+        for (const g of sorted) {
+          const p1s = Number(g.team1_score || 0);
+          const p2s = Number(g.team2_score || 0);
+          const w = isGameOver({ p1: p1s, p2: p2s });
+          if (w) {
+            finished.push({ g: g.game_number, p1: p1s, p2: p2s, winner: w });
+            gw[w] += 1;
+            lastWinner = w;
+            currentG = (g.game_number || 0) + 1;
+          } else if (!foundCurrent) {
+            // first incomplete game is the current
+            foundCurrent = true;
+            currentG = g.game_number || currentG;
+            currP1s = p1s; currP2s = p2s;
+            if (active) {
+              setScore({ p1: p1s, p2: p2s });
+              setCounts({ p1: p1s, p2: p2s });
+            }
+          }
+        }
+        if (currentG > MAX_GAMES) currentG = MAX_GAMES;
+        const isOver = gw.p1 >= 3 || gw.p2 >= 3 || (finished.length >= MAX_GAMES);
+
+        if (active) {
+          if (p1) setP1Name(p1);
+          if (p2) setP2Name(p2);
+          setGamesWon(gw);
+          setGames(finished);
+          setGameNumber(currentG);
+          setMatchOver(isOver);
+          // Start-of-game handling: if scores are 0-0, show modal for confirmation
+          const isStartOfGame = foundCurrent ? (currP1s === 0 && currP2s === 0) : (!finished.length ? true : currentG > finished.length);
+          if (!isOver && isStartOfGame) {
+            const defaultServer = lastWinner || startServer;
+            const nextBox = pref[defaultServer] || 'R';
+            setStartServer(defaultServer);
+            setStartBox(nextBox);
+            setServer(defaultServer); // reflect in UI behind modal
+            setBox((b) => ({ ...b, [defaultServer]: nextBox }));
+            setStartMark(null);
+            setShowStart(true);
+          } else {
+            setShowStart(false);
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    if (!Number.isNaN(matchId)) fetchNames();
+    return () => { active = false; };
+  }, [matchId]);
+
+  const addPoint = (winner) => {
+    if (matchOver) return;
+    snap();
+
+    // Decide what to display and where next rally starts
+    let recordBox;
+    if (winner === server) {
+      // Server wins → next rally on opposite
+      recordBox = opp(box[winner]);
+      setBox((b) => ({ ...b, [winner]: recordBox }));
+      setServer(winner);
+    } else {
+      // Handout → winner serves from preferred
+      recordBox = pref[winner] || "R";
+      setBox((b) => ({ ...b, [winner]: recordBox }));
+      setServer(winner);
+    }
+
+    // Compute next scores/counts synchronously
+    const nextCounts = { ...counts, [winner]: counts[winner] + 1 };
+    const nextScore = { ...score, [winner]: score[winner] + 1 };
+
+    // Apply UI updates
+    setCounts(nextCounts);
+    setScore(nextScore);
+    setSeq((a) => [...a, { side: winner, box: recordBox, n: (winner === 'p1' ? nextCounts.p1 : nextCounts.p2) }]);
+
+    // Check game over (11, win by 2)
+    const gWinner = isGameOver(nextScore);
+    if (gWinner) {
+      // Record game result
+      const p1 = nextScore.p1;
+      const p2 = nextScore.p2;
+      setGames((arr) => [...arr, { g: gameNumber, p1, p2, winner: gWinner }]);
+      setGamesWon((gw) => {
+        const updated = { ...gw, [gWinner]: gw[gWinner] + 1 };
+        const over = updated.p1 >= 3 || updated.p2 >= 3 || gameNumber >= MAX_GAMES;
+        if (over) setMatchOver(true);
+        return updated;
       });
-    }, 1000);
+
+      // Persist this game's score to backend
+      postGameToServer(gameNumber, p1, p2);
+
+      // Advance to next game automatically if match not over
+      const willBeOver = (gamesWon[gWinner] + 1) >= 3 || gameNumber >= MAX_GAMES;
+      if (!willBeOver) {
+        startNextGame(gWinner);
+      }
+    }
   };
 
-  const stopTimer = () => { if (timerRef.current) { clearInterval(timerRef.current); } setTimer(0); };
-
-  const finalizeGame = async (action) => {
-    // action: 'timer' | 'next'
-    setShowWinModal(false);
-    await save();
-    if (currentGame < 5) setCurrentGame(g => g + 1);
-    if (action === 'timer') startTimer(120); else stopTimer();
+  const confirmStart = () => {
+    snap();
+    setServer(startServer);
+    setBox((b) => ({ ...b, [startServer]: startBox }));
+    setStartMark(startBox);
+    setShowStart(false);
   };
 
-  if (!match) return <div className="card">Loading…</div>;
+  const resetAll = () => {
+    snap();
+    setScore({ p1: 0, p2: 0 });
+    setCounts({ p1: 0, p2: 0 });
+    setServer("p1");
+    setBox({ p1: "R", p2: "R" });
+    setPref({ p1: "R", p2: "R" });
+    setSeq([]);
+    setStartMark(null);
+    setShowStart(true);
+    setGameNumber(1);
+    setGamesWon({ p1: 0, p2: 0 });
+    setGames([]);
+    setMatchOver(false);
+  };
 
   return (
     <div className="scoreboard">
-      {showWinModal && (
-        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000}}>
-          <div className="card" style={{width:360}}>
-            <div style={{fontWeight:700, marginBottom:8}}>Game {currentGame} decided</div>
-            <div className="muted" style={{marginBottom:12}}>
-              Winner: {winSide==='t1'? leftLabel : rightLabel} • Score {local.t1}-{local.t2}
+      {showStart && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+          <div className="card" style={{ width: 380 }}>
+            <div style={{ fontWeight: 800, marginBottom: 10, fontSize: 18 }}>Start Game</div>
+            <div className="muted" style={{marginBottom:6}}>Initial Server</div>
+            <div className="seg-group" role="group">
+              <button className={`seg ${startServer==='p1'?'active':''}`} onClick={() => setStartServer('p1')}>{p1Name}</button>
+              <button className={`seg ${startServer==='p2'?'active':''}`} onClick={() => setStartServer('p2')}>{p2Name}</button>
             </div>
-            <div style={{display:'flex', gap:8, flexWrap:'wrap'}}>
-              <button className="btn btn-primary" onClick={()=>finalizeGame('timer')}>Save & 2:00 Timer</button>
-              <button className="btn" onClick={()=>finalizeGame('next')}>Save & Next Now</button>
-              <button className="btn" onClick={()=>setShowWinModal(false)}>Cancel</button>
+            <div className="muted" style={{marginTop:12, marginBottom:6}}>Serve Side</div>
+            <div className="seg-group" role="group">
+              <button className={`seg ${startBox==='R'?'active':''}`} onClick={() => setStartBox('R')}>R</button>
+              <button className={`seg ${startBox==='L'?'active':''}`} onClick={() => setStartBox('L')}>L</button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
+              <button className="btn" onClick={() => setShowStart(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={confirmStart}>Start</button>
             </div>
           </div>
         </div>
       )}
-      <div className="scoreboard-top">
-        <Link to={`/matches/${matchId}`} className="btn">Back</Link>
-        <div className="scoreboard-games">
-          {[1,2,3,4,5].map(g => (
-            <button key={g} className={`btn ${g===currentGame? 'btn-primary':''}`} onClick={()=>setCurrentGame(g)}>G{g}</button>
-          ))}
+
+      {/* Controls */}
+      <div className="card">
+        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:10 }}>
+          <span className="tag">Game: {gameNumber} / {MAX_GAMES}</span>
+          <span className="tag">Games Won: {p1Name} {gamesWon.p1} - {gamesWon.p2} {p2Name}</span>
+          {matchOver && <span className="tag">Match Over</span>}
         </div>
-        <button className="btn" onClick={undo} disabled={stack.length===0}>Undo</button>
-      </div>
-      <div className="scoreboard-top" style={{justifyContent:'center', gap:8}}>
-        <span className="muted" style={{fontSize:12}}>First Server</span>
-        <button className={`btn ${gameConfig[currentGame]?.server==='t1'?'btn-primary':''}`} onClick={()=>{ setGameConfig(g=>({ ...g, [currentGame]: { ...(g[currentGame]||{}), server:'t1'} })); setServerTeam('t1'); setServeBox(b=>({ ...b, t1: gameConfig[currentGame]?.box || 'R' })); }}>Left</button>
-        <button className={`btn ${gameConfig[currentGame]?.server==='t2'?'btn-primary':''}`} onClick={()=>{ setGameConfig(g=>({ ...g, [currentGame]: { ...(g[currentGame]||{}), server:'t2'} })); setServerTeam('t2'); setServeBox(b=>({ ...b, t2: gameConfig[currentGame]?.box || 'R' })); }}>Right</button>
-        <span className="muted" style={{fontSize:12}}>First Box</span>
-        <button className={`btn ${gameConfig[currentGame]?.box==='R'?'btn-primary':''}`} onClick={()=>{ setGameConfig(g=>({ ...g, [currentGame]: { ...(g[currentGame]||{}), box:'R'} })); setServeBox(b=>({ ...b, [serverTeam]:'R' })); }}>R</button>
-        <button className={`btn ${gameConfig[currentGame]?.box==='L'?'btn-primary':''}`} onClick={()=>{ setGameConfig(g=>({ ...g, [currentGame]: { ...(g[currentGame]||{}), box:'L'} })); setServeBox(b=>({ ...b, [serverTeam]:'L' })); }}>L</button>
+        <div className="grid grid-2">
+          <div>
+            <div className="muted" style={{marginBottom:6}}>Serve Pref (handout) – {p1Name}</div>
+            <div className="seg-group" role="group">
+              <button className={`seg ${pref.p1==='R'?'active':''}`} onClick={() => { setPref(p => ({...p, p1:'R'})); if (server==='p1') setBox(b=>({...b,p1:'R'})); }}>R</button>
+              <button className={`seg ${pref.p1==='L'?'active':''}`} onClick={() => { setPref(p => ({...p, p1:'L'})); if (server==='p1') setBox(b=>({...b,p1:'L'})); }}>L</button>
+            </div>
+            <div className="muted" style={{marginTop:12, marginBottom:6}}>Serve Pref (handout) – {p2Name}</div>
+            <div className="seg-group" role="group">
+              <button className={`seg ${pref.p2==='R'?'active':''}`} onClick={() => { setPref(p => ({...p, p2:'R'})); if (server==='p2') setBox(b=>({...b,p2:'R'})); }}>R</button>
+              <button className={`seg ${pref.p2==='L'?'active':''}`} onClick={() => { setPref(p => ({...p, p2:'L'})); if (server==='p2') setBox(b=>({...b,p2:'L'})); }}>L</button>
+            </div>
+          </div>
+          <div>
+            <div className="muted" style={{marginBottom:6}}>Initial Server</div>
+            <div className="seg-group" role="group">
+              <button className={`seg ${server==='p1'?'active':''}`} onClick={() => setServer('p1')}>{p1Name}</button>
+              <button className={`seg ${server==='p2'?'active':''}`} onClick={() => setServer('p2')}>{p2Name}</button>
+            </div>
+            <div className="form-row" style={{marginTop:12, gap:8}}>
+              <button className="btn" onClick={undo} disabled={!stack.length}>Undo</button>
+              <button className="btn" onClick={resetAll}>Reset</button>
+            </div>
+          </div>
+        </div>
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap:'wrap' }}>
+          <span className="tag">Server: {server==='p1'? p1Name : p2Name}</span>
+          <span className="tag">Boxes: {box.p1}/{box.p2}</span>
+          <span className="tag">Pref: {pref.p1}/{pref.p2}</span>
+        </div>
       </div>
 
+      {/* Court */}
       <div className="scoreboard-court">
+        {/* Left */}
         <div className="side">
-          <div className={serverTeam==='t1' ? 'serve-badge' : 'receive-badge'}>
-            {serverTeam==='t1' ? `Serve ${serveBox.t1}` : 'Receive'}
-          </div>
-          <div className="name">{leftLabel}</div>
-          <div className="big">{local.t1}</div>
-          <button className="add" onClick={()=>addPoint('t1')}>+</button>
+          <div className={server==='p1' ? 'serve-badge' : 'receive-badge'}>{server==='p1' ? `Serve ${box.p1}` : 'Receive'}</div>
+          <div className="name">{p1Name}</div>
+          <div className="big">{score.p1}</div>
+          <button className="add" onClick={() => addPoint('p1')} disabled={matchOver}>+</button>
         </div>
+
+        {/* Timeline */}
         <div className="timeline">
           <div className="track" />
-          {(timeline[currentGame]||[]).map((it)=> (
-            <div key={it.n} className={`tl-item ${it.winner==='t1'?'win-left':'win-right'}`}>
-              <div className="tl-label left">{it.server==='t1'? it.box : ''}</div>
-              <div className="tl-dot">{it.score ?? it.n}</div>
-              <div className="tl-label right">{it.server==='t2'? it.box : ''}</div>
+          {startMark && (
+            <div className={`tl-item ${startServer==='p1' ? 'win-left' : 'win-right'}`}>
+              <div className="tl-dot">{startMark}</div>
+            </div>
+          )}
+          {seq.map((ev, i) => (
+            <div key={i} className={`tl-item ${ev.side==='p1'?'win-left':'win-right'}`}>
+              <div className="tl-dot">{`${ev.n}${ev.box}`}</div>
             </div>
           ))}
         </div>
-        <div className="side">
-          <div className={serverTeam==='t2' ? 'serve-badge' : 'receive-badge'}>
-            {serverTeam==='t2' ? `Serve ${serveBox.t2}` : 'Receive'}
-          </div>
-          <div className="name">{rightLabel}</div>
-          <div className="big">{local.t2}</div>
-          <button className="add" onClick={()=>addPoint('t2')}>+</button>
-        </div>
-      </div>
 
-      <div className="scoreboard-bottom" style={{gap:10}}>
-        <div className="tag">Server: {serverTeam==='t1'? leftLabel : rightLabel}</div>
-        <div className="tag">Boxes: {serveBox.t1}/{serveBox.t2}</div>
-        {timer>0 && <div className="tag">Next game in {Math.floor(timer/60)}:{String(timer%60).padStart(2,'0')}</div>}
-        <button className="btn" onClick={()=>setServerTeam(s => s==='t1'?'t2':'t1')}>Switch Server</button>
-        <button className="btn" onClick={()=>setServeBox(b => ({...b, [serverTeam]: b[serverTeam]==='L'?'R':'L'}))}>Toggle Box</button>
-        <button className="btn btn-primary" onClick={save}>Save Game {currentGame}</button>
-        <button className="btn" onClick={()=>{ stopTimer(); if (currentGame<5) setCurrentGame(g=>g+1); }}>Start Next Now</button>
+        {/* Right */}
+        <div className="side">
+          <div className={server==='p2' ? 'serve-badge' : 'receive-badge'}>{server==='p2' ? `Serve ${box.p2}` : 'Receive'}</div>
+          <div className="name">{p2Name}</div>
+          <div className="big">{score.p2}</div>
+          <button className="add" onClick={() => addPoint('p2')} disabled={matchOver}>+</button>
+        </div>
       </div>
     </div>
   );
