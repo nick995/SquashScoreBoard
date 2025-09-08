@@ -1,0 +1,87 @@
+/* MatchDetail responsive styles */
+
+.match-detail-page{min-width:0;overflow-x:hidden}
+.match-detail-page *{min-width:0;max-width:100%}
+.match-detail-page h2{overflow-wrap:anywhere;word-break:break-word}
+
+.md-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.md-table-wrap { display: block; }
+.md-mob { display: none; }
+
+.md-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.md-table th,
+.md-table td {
+  padding: 8px 6px;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.md-table th:first-child,
+.md-table td:first-child {
+  text-align: left;
+}
+
+.md-team {
+  font-weight: 700;
+  position: sticky;
+  left: 0;
+  background: rgba(20,22,32,0.6);
+  backdrop-filter: blur(2px);
+  z-index: 1;
+  max-width: 40vw;
+}
+
+.md-cell { display: inline-flex; align-items: center; gap: 6px; }
+/* High-contrast, fixed-height numeric input for visibility */
+.md-input {
+  width: 72px;
+  min-width: 64px;
+  height: 40px;
+  padding: 6px 10px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0a0e1a;            /* dark text on white */
+  background: #ffffff;       /* ensure solid white */
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+/* Remove native spinners to avoid visual clutter/cropping */
+.md-input::-webkit-outer-spin-button,
+.md-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.md-input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+.md-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+@media (max-width: 720px) {
+  .md-table th, .md-table td { padding: 6px 4px; }
+  .md-input { width: 64px; height: 38px; font-size: 17px; }
+}
+
+@media (max-width: 560px) {
+  .md-table-wrap { display: none; }
+  .md-mob { display: grid; gap: 10px; }
+  .md-mob-game { border: 1px solid var(--border); border-radius: 12px; padding: 10px; background: rgba(255,255,255,0.04); }
+  .md-mob-ghead { font-weight: 700; margin-bottom: 6px; }
+  .md-mob-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .md-mob-team { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .md-stepper { display: inline-flex; align-items: center; gap: 6px; }
+  .md-stepper .btn { padding: 6px 10px; }
+  .md-input { width: 56px; height: 36px; font-size: 16px; }
+  .md-actions { gap: 6px; }
+  .md-actions .btn { flex: 1 1 auto; min-width: 110px; }
+}
+
+@media (max-width: 380px) {
+  .md-input { width: 48px; height: 34px; font-size: 15px; }
+  .md-actions .btn { min-width: 100px; }
+}

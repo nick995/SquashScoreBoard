@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.core.db import get_db
 from app.models.match import Match as MatchModel
 from app.models.gamescore import GameScore as GameScoreModel
@@ -13,7 +13,14 @@ router = APIRouter(prefix="/matches", tags=["matches"])
 @router.get("/", response_model=list[MatchSchema])
 @router.get("", response_model=list[MatchSchema])
 def list_matches(db: Session = Depends(get_db)):
-    items = db.query(MatchModel).all()
+    items = (
+        db.query(MatchModel)
+        .options(
+            selectinload(MatchModel.games),
+            selectinload(MatchModel.referees),
+        )
+        .all()
+    )
     results: list[MatchSchema] = []
     for m in items:
         results.append(MatchSchema(
@@ -122,7 +129,15 @@ def update_score(match_id: int, game_number: int, team1_score: int, team2_score:
 
 @router.get("/{match_id}", response_model=MatchSchema)
 def get_match(match_id: int, db: Session = Depends(get_db)):
-    m = db.query(MatchModel).filter(MatchModel.id == match_id).first()
+    m = (
+        db.query(MatchModel)
+        .options(
+            selectinload(MatchModel.games),
+            selectinload(MatchModel.referees),
+        )
+        .filter(MatchModel.id == match_id)
+        .first()
+    )
     if not m:
         raise HTTPException(status_code=404, detail="Match not found")
     return MatchSchema(

@@ -263,7 +263,7 @@ a { color: inherit; text-decoration: none; }
   .scoreboard-court {
     display: grid;
     grid-template-columns: 1fr;          /* 세로 스택 */
-    grid-template-rows: auto 10px auto;  /* 좌/구분/우 */
+    grid-template-rows: auto auto auto;  /* 좌/타임라인/우 */
     gap: 12px;
     padding: 16px 10px;
   }

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import client from "../../api/client";
+import "./scoreboard.css";
+import "./scoreboard.css"; // <-- add this import
 
 // CSS‑first, tidy scoreboard implementing explicit serve logic
 // - Server wins: next rally starts on opposite box → record n+Opposite
@@ -103,21 +105,26 @@ export default function MatchScoreboard() {
     let active = true;
     const fetchNames = async () => {
       try {
-        const [mRes, uRes] = await Promise.all([
-          client.get(`/matches/${matchId}`),
-          client.get(`/users`).catch(() => ({ data: [] })),
-        ]);
+        const mRes = await client.get(`/matches/${matchId}`);
         const m = mRes.data || {};
-        const users = uRes.data || [];
-        const findById = (uid) => users.find((u) => Number(u.id) === Number(uid));
-        const findByTeamOrder = (teamId, order) => users.find((u) => Number(u.team_id) === Number(teamId) && Number(u.player_number) === Number(order));
-
-        // Player 1 (team1)
-        let p1 = findById(m.team1_player_id)?.name;
-        if (!p1 && m.team1_id && m.order) p1 = findByTeamOrder(m.team1_id, m.order)?.name;
-        // Player 2 (team2)
-        let p2 = findById(m.team2_player_id)?.name;
-        if (!p2 && m.team2_id && m.order) p2 = findByTeamOrder(m.team2_id, m.order)?.name;
+        let p1Id = m.team1_player_id;
+        let p2Id = m.team2_player_id;
+        let p1 = null, p2 = null;
+        if (p1Id && p2Id) {
+          const [u1, u2] = await Promise.all([
+            client.get(`/users/${p1Id}`).catch(() => ({ data: null })),
+            client.get(`/users/${p2Id}`).catch(() => ({ data: null })),
+          ]);
+          p1 = u1.data?.name || null;
+          p2 = u2.data?.name || null;
+        } else {
+          // fallback (rare): find by team/order from all users
+          const uRes = await client.get(`/users`).catch(() => ({ data: [] }));
+          const users = uRes.data || [];
+          const findByTeamOrder = (teamId, order) => users.find((u) => Number(u.team_id) === Number(teamId) && Number(u.player_number) === Number(order));
+          if (!p1 && m.team1_id && m.order) p1 = findByTeamOrder(m.team1_id, m.order)?.name;
+          if (!p2 && m.team2_id && m.order) p2 = findByTeamOrder(m.team2_id, m.order)?.name;
+        }
 
         // Compute game progress from backend games
         const sorted = (m.games || []).slice().sort((a, b) => (a.game_number || 0) - (b.game_number || 0));
@@ -259,8 +266,8 @@ export default function MatchScoreboard() {
   return (
     <div className="scoreboard">
       {showStart && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-          <div className="card" style={{ width: 380 }}>
+        <div className="modal-overlay">
+          <div className="card modal-card">
             <div style={{ fontWeight: 800, marginBottom: 10, fontSize: 18 }}>Start Game</div>
             <div className="muted" style={{marginBottom:6}}>Initial Server</div>
             <div className="seg-group" role="group">
@@ -282,10 +289,14 @@ export default function MatchScoreboard() {
 
       {/* Controls */}
       <div className="card">
-        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:10 }}>
-          <span className="tag">Game: {gameNumber} / {MAX_GAMES}</span>
-          <span className="tag">Games Won: {p1Name} {gamesWon.p1} - {gamesWon.p2} {p2Name}</span>
-          {matchOver && <span className="tag">Match Over</span>}
+        <div style={{ textAlign:'center', marginBottom:12 }}>
+          <div style={{ fontWeight:800, fontSize:22, letterSpacing:'0.3px' }}>
+            Game {gameNumber} / {MAX_GAMES}
+          </div>
+          <div style={{ marginTop:6, fontSize:18, opacity:0.95 }}>
+            {p1Name} {gamesWon.p1} - {gamesWon.p2} {p2Name}
+          </div>
+          {matchOver && <div className="tag" style={{ marginTop:8 }}>Match Over</div>}
         </div>
         <div className="grid grid-2">
           <div>
@@ -312,11 +323,7 @@ export default function MatchScoreboard() {
             </div>
           </div>
         </div>
-        <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap:'wrap' }}>
-          <span className="tag">Server: {server==='p1'? p1Name : p2Name}</span>
-          <span className="tag">Boxes: {box.p1}/{box.p2}</span>
-          <span className="tag">Pref: {pref.p1}/{pref.p2}</span>
-        </div>
+        {/* Removed verbose tags (Server/Boxes/Pref) for cleaner UI */}
       </div>
 
       {/* Court */}

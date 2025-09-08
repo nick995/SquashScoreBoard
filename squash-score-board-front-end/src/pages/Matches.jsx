@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import client from "../../api/client";
 import { Link, useNavigate } from "react-router-dom";
+import "./matches.css"; 
 
 export default function Matches() {
   const [matches, setMatches] = useState([]);
@@ -122,7 +123,7 @@ export default function Matches() {
   };
 
   return (
-    <div className="grid">
+    <div className="grid matches-page">
       {/* Pairing generator removed */}
 
       <div className="card">
@@ -201,10 +202,10 @@ export default function Matches() {
                 {refOptions.length === 0 && !refLoading ? (
                   <div className="muted" style={{fontSize:13}}>No users found</div>
                 ) : (
-                  <ul style={{margin:0, padding:0, listStyle:'none', maxHeight:180, overflowY:'auto'}}>
+                  <ul className="ref-results">
                     {refOptions.map(u => (
-                      <li key={u.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderBottom:'1px solid var(--border)'}}>
-                        <div>{u.name}{u.player_number ? ` #${u.player_number}` : ''} <span className="muted" style={{fontSize:12}}>{u.team_id ? `• team ${u.team_id}` : ''}</span></div>
+                      <li key={u.id} className="ref-row">
+                        <div className="truncate">{u.name}{u.player_number ? ` #${u.player_number}` : ''} <span className="muted" style={{fontSize:12}}>{u.team_id ? `• team ${u.team_id}` : ''}</span></div>
                         <button type="button" className="btn" onClick={()=>addRef(u.id)}>Add</button>
                       </li>
                     ))}
@@ -227,14 +228,14 @@ export default function Matches() {
         ) : (
           <ul style={{margin:0, padding:0, listStyle:'none'}}>
             {recent.map(m => (
-              <li key={m.id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 0', borderBottom:'1px solid var(--border)'}}>
-                <div>
-                  <div style={{fontWeight:600}}>#{m.order ?? '-'} {userLabel(m.team1_player_id, m.team1_id, m.order)} vs {userLabel(m.team2_player_id, m.team2_id, m.order)}</div>
-                  <div className="muted" style={{fontSize:13}}>
+              <li key={m.id} className="recent-row">
+                <div className="recent-main">
+                  <div className="recent-title" style={{fontWeight:600}}>#{m.order ?? '-'} {userLabel(m.team1_player_id, m.team1_id, m.order)} vs {userLabel(m.team2_player_id, m.team2_id, m.order)}</div>
+                  <div className="muted">
                     Match #{m.id} {m.court ? `• ${m.court}` : ''} • {teamName(m.team1_id)} vs {teamName(m.team2_id)} {m.score_summary ? `• ${m.score_summary}` : ''}
                   </div>
                 </div>
-                <div style={{display:'flex', gap:8}}>
+                <div className="recent-actions">
                   <Link className="btn" to={`/matches/${m.id}`}>Details</Link>
                   <Link className="btn btn-primary" to={`/matches/${m.id}/scoreboard`}>Score</Link>
                 </div>

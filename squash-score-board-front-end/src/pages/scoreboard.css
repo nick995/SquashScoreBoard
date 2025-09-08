@@ -1,0 +1,59 @@
+/* Scoreboard responsive tuning: keep left/right columns with slim center track */
+
+/* Base tightening (applies to all sizes when this CSS is loaded) */
+.scoreboard .timeline { gap: 4px; }
+.scoreboard .tl-item { height: clamp(18px, 3vh, 24px); }
+
+@media (max-width: 560px) {
+  .scoreboard { padding: 10px; }
+
+  /* Keep 3 columns even on small screens */
+  .scoreboard .scoreboard-court,
+  .scoreboard-court {
+    display: grid;
+    grid-template-columns: 1fr;          /* 세로 스택: 위 → 가운데(타임라인) → 아래 */
+    grid-template-rows: auto auto auto;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px 8px;
+  }
+
+  /* Side columns tighten spacing but remain vertical */
+  .scoreboard .side { gap: 8px; flex-direction: column; }
+  .scoreboard .name { font-size: clamp(12px, 3.6vw, 14px); font-weight: 700; text-align: center; }
+  .serve-badge, .receive-badge { font-size: 11px; padding: 2px 6px; }
+
+  /* Big score + add button sizes tuned for narrow widths */
+  .scoreboard .big { font-size: clamp(48px, 16vw, 72px); }
+  .scoreboard .add { width: auto; min-width: 72px; height: 40px; font-size: 20px; padding: 0 12px; }
+
+  /* Center timeline slimmer + tighter vertical rhythm */
+  .timeline { --tl-offset: 18px; --tl-gap: 6px; padding: 4px 0; gap: 3px; }
+  .timeline .track { width: 6px; }
+  .tl-item { height: clamp(28px, 4.8vh, 36px); }
+  .tl-dot { width: clamp(18px, 5vw, 24px); height: clamp(18px, 5vw, 24px); border-width: 2px; font-size: 12px; }
+}
+
+@media (max-width: 380px) {
+  .timeline { --tl-offset: 14px; }
+  .scoreboard .add { min-width: 64px; height: 38px; font-size: 18px; }
+}
+
+/* --- Start modal visibility tweaks --- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 22, 0.78);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+}
+.modal-card {
+  background: rgba(20, 24, 40, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  width: min(360px, calc(100vw - 36px));
+}

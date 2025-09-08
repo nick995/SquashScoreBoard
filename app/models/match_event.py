@@ -6,11 +6,11 @@ class MatchEvent(Base):
     __tablename__ = "match_events"
 
     id = Column(Integer, primary_key=True, index=True)
-    match_id = Column(Integer, ForeignKey("matches.id"), nullable=False)
+    match_id = Column(Integer, ForeignKey("matches.id"), nullable=False, index=True)
     event_type = Column(String, nullable=False)
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
     player_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    game_number = Column(Integer, nullable=False, default=0)
+    game_number = Column(Integer, nullable=False, default=0, index=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
     match = relationship("Match")
