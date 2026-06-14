@@ -7,19 +7,20 @@
 @media (max-width: 560px) {
   .scoreboard { padding: 10px; }
 
-  /* Keep 3 columns even on small screens */
+  /* Keep 3 columns even on small screens (좌: P1 | 중앙: 타임라인 | 우: P2) */
   .scoreboard .scoreboard-court,
   .scoreboard-court {
     display: grid;
-    grid-template-columns: 1fr;          /* 세로 스택: 위 → 가운데(타임라인) → 아래 */
-    grid-template-rows: auto auto auto;
+    grid-template-columns: 1fr minmax(90px, 22vw) 1fr; /* 3열 유지 */
+    grid-template-rows: auto;
     align-items: stretch;
     gap: 10px;
     padding: 12px 8px;
   }
 
-  /* Side columns tighten spacing but remain vertical */
-  .scoreboard .side { gap: 8px; flex-direction: column; }
+  /* Side columns tighten spacing but remain vertical inside each side */
+  .scoreboard .side,
+  .scoreboard-court .side { gap: 8px; flex-direction: column; }
   .scoreboard .name { font-size: clamp(12px, 3.6vw, 14px); font-weight: 700; text-align: center; }
   .serve-badge, .receive-badge { font-size: 11px; padding: 2px 6px; }
 
@@ -56,4 +57,44 @@
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
   width: min(360px, calc(100vw - 36px));
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Inline serve-side picker (R/L) shown on the serving player's side */
+.serve-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(39, 174, 96, 0.25);
+}
+.serve-pick-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+}
+.serve-pick .seg-group {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.serve-pick .seg {
+  color: rgba(255, 255, 255, 0.78);
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 800;
+  min-width: 26px;
+}
+.serve-pick .seg.active {
+  background: rgba(255, 255, 255, 0.92);
+  color: #166033;
 }

@@ -6,9 +6,18 @@ from app.schemas.user import User, UserCreate, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
+MAX_TEAM_PLAYERS = 4
+
+
+def _team_member_count(db: Session, team_id: int) -> int:
+    return db.query(UserModel).filter(UserModel.team_id == team_id).count()
+
 @router.post("/", response_model=User)
 @router.post("", response_model=User)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
+    if user.team_id is not None:
+        if _team_member_count(db, user.team_id) >= MAX_TEAM_PLAYERS:
+            raise HTTPException(status_code=400, detail=f"Team is full (max {MAX_TEAM_PLAYERS} players)")
     db_user = UserModel(**user.dict())
     db.add(db_user)
     db.commit()
@@ -57,6 +66,10 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
             team = db.query(TeamModel).filter(TeamModel.id == payload.team_id).first()
             if not team:
                 raise HTTPException(status_code=400, detail="Target team not found")
+            # Only enforce the cap when actually moving to a new team
+            if user.team_id != payload.team_id:
+                if _team_member_count(db, payload.team_id) >= MAX_TEAM_PLAYERS:
+                    raise HTTPException(status_code=400, detail=f"Team is full (max {MAX_TEAM_PLAYERS} players)")
             user.team_id = payload.team_id
     db.commit()
     db.refresh(user)

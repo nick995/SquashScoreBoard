@@ -116,8 +116,17 @@ a { color: inherit; text-decoration: none; }
 .scoreboard { background: #23262f url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%224%22 height=%224%22 viewBox=%220 0 4 4%22%3E%3Cpath fill=%22%23333%22 d=%22M0 0h4v4H0z%22/%3E%3Cpath fill=%22%232e313a%22 d=%22M0 0h2v2H0zM2 2h2v2H2z%22/%3E%3C/svg%3E') repeat; border:1px solid var(--border); border-radius:16px; box-shadow: 0 16px 40px rgba(0,0,0,.25); padding:16px; }
 .scoreboard-top { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:12px; }
 .scoreboard-games { display:flex; gap:8px; }
-.scoreboard-court { display:grid; grid-template-columns: 1fr minmax(140px, 24vw) 1fr; align-items:center; gap:10px; padding: 24px 10px; border-radius:12px; background: #2b2f3a; border: 1px solid rgba(255,255,255,0.08); }
-.scoreboard .side { display:flex; flex-direction:column; align-items:center; gap:10px; }
+.scoreboard-court {
+  display: grid;
+  grid-template-columns: 1fr minmax(140px, 24vw) 1fr;
+  align-items: stretch;
+  gap: 10px;
+  padding: 24px 10px;
+  border-radius: 12px;
+  background: #2b2f3a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.scoreboard .side { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:0; }
 .serve-badge, .receive-badge { font-size: 12px; padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.18); }
 .serve-badge { background: linear-gradient(135deg, #27ae60, #2ecc71); color:#fff; box-shadow: 0 6px 14px rgba(39,174,96,.25); }
 .receive-badge { background: rgba(255,255,255,0.08); color:#e7ebf6; }
@@ -128,13 +137,62 @@ a { color: inherit; text-decoration: none; }
 .scoreboard-bottom { display:flex; justify-content:center; margin-top:14px; }
 
 /* timeline between sides */
-.timeline { position: relative; height:100%; width: 100%; display:flex; flex-direction:column; justify-content:flex-start; align-items:center; gap:6px; padding: 12px 0; 
+.timeline {
+  position: relative;
+  width: 100%;
+  align-self: stretch;
+  min-height: 0;
   --tl-offset: clamp(40px, 7vw, 40px);   /* closer to the track */
   --tl-gap: clamp(8px, 2vw, 30px);     /* smaller label gap */
 }
+/* Absolutely-positioned scroller so timeline content NEVER inflates the grid row.
+   This is what keeps the scoreboard-court height locked to the .side columns. */
+.tl-scroll {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+.tl-scroll::-webkit-scrollbar { width: 6px; }
+.tl-scroll::-webkit-scrollbar-track { background: transparent; }
+.tl-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 999px; }
+.tl-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.36); }
 .timeline .track { position:absolute; left:50%; top:0; bottom:0; width:10px; background:#ffc107; border-radius:999px; box-shadow: inset 0 0 0 2px rgba(0,0,0,.25); }
-.tl-item { position: relative; height: clamp(44px, 6.5vh, 60px); display:flex; align-items:center; justify-content:center; width:100%; }
-.tl-dot { position:absolute; left:50%; transform: translateX(-50%); width: clamp(26px, 4.5vw, 36px); height: clamp(26px, 4.5vw, 36px); border-radius:50%; border:3px solid #ffc107; color:#ffc107; display:flex; align-items:center; justify-content:center; font-weight:800; background: rgba(0,0,0,0.25); }
+.tl-item { position: relative; height: clamp(44px, 6.5vh, 60px); flex-shrink: 0; display:flex; align-items:center; justify-content:center; width:100%; }
+.tl-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: clamp(34px, 5vw, 44px);
+  height: clamp(34px, 5vw, 44px);
+  min-width: 34px;
+  min-height: 34px;
+  aspect-ratio: 1 / 1;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #ffc107;
+  color: #ffc107;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: clamp(11px, 1.6vw, 14px);
+  line-height: 1;
+  background: rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
 .tl-item.win-left .tl-dot { margin-left: calc(-1 * var(--tl-offset)); }
 .tl-item.win-right .tl-dot { margin-left: var(--tl-offset); }
 .tl-label { position:absolute; top:50%; transform: translateY(-50%); color:#e7ebf6; opacity:.95; font-weight:700; font-size: clamp(12px, 1.8vw, 16px); }
@@ -268,6 +326,11 @@ a { color: inherit; text-decoration: none; }
     padding: 16px 10px;
   }
   .scoreboard .side { flex-direction: row; justify-content: space-between; }
+  /* Mobile: timeline is its own row — needs an explicit height since
+     its scroll children are absolutely positioned (intrinsic = 0). */
+  .timeline {
+    height: clamp(220px, 40vh, 320px);
+  }
   .scoreboard .divider {
     width: 100%; height: 10px;           /* 가로 구분선로 변경 */
     border-radius: 6px;
@@ -286,7 +349,15 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 560px) {
   .timeline { --tl-offset: 28px; --tl-gap: 8px; padding: 6px 0; }
   .tl-item { height: clamp(40px, 7vh, 60px); }
-  .tl-dot { width: clamp(22px, 5vw, 30px); height: clamp(22px, 5vw, 30px); border-width: 2px; }
+  .tl-dot {
+    width: clamp(30px, 7vw, 38px);
+    height: clamp(30px, 7vw, 38px);
+    min-width: 30px;
+    min-height: 30px;
+    aspect-ratio: 1 / 1;
+    border-width: 2px;
+    font-size: clamp(10px, 3vw, 12px);
+  }
   .tl-label { font-size: clamp(11px, 3.2vw, 14px); }
 }
 

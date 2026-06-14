@@ -4,12 +4,19 @@ import { Link } from "react-router-dom";
 
 export default function TeamList() {
   const [teams, setTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     client.get("/teams")
-      .then(res => setTeams(res.data))
-      .catch(err => console.error(err));
+      .then(res => setTeams(Array.isArray(res.data) ? res.data : []))
+      .catch(err => { console.error(err); setTeams([]); })
+      .finally(() => setLoading(false));
   }, []);
+
+  if (loading) {
+    return <p className="muted">Loading...</p>;
+  }
 
   if (!teams.length) {
     return <p className="muted">No teams yet. Create one above!</p>;

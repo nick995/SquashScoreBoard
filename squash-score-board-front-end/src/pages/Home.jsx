@@ -26,7 +26,7 @@ export default function Home() {
         <div className="hero-gradient" />
       </section>
 
-  
+
     </>
   );
 }

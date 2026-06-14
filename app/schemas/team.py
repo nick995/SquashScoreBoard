@@ -21,6 +21,7 @@ class TeamCreate(BaseModel):
 class TeamBasic(BaseModel):
     id: int
     name: str
+    total_points: int | None = 0
 
     class Config:
         from_attributes = True

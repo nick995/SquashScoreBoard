@@ -10,6 +10,34 @@ from app.utils.scoring import check_winner, calculate_match_points, apply_sub_ru
 
 router = APIRouter(prefix="/matches", tags=["matches"])
 
+def _heal_winner(match: MatchModel, db: Session) -> int | None:
+    """If the match's games already indicate a winner but `winner_team_id`
+    wasn't persisted (race condition during the last write), derive it now and
+    persist on the fly so subsequent reads stay consistent."""
+    if match.winner_team_id:
+        return match.winner_team_id
+    derived = check_winner(match)
+    if derived:
+        prev = match.winner_team_id
+        match.winner_team_id = derived
+        # Recompute the per-match team points and team totals only on the
+        # first transition (mirrors the guard in update_score so we don't
+        # double-count).
+        pts = calculate_match_points(match)
+        pts = apply_sub_rule(pts, match)
+        match.team1_points, match.team2_points = pts
+        match.score_summary = f"{match.team1_points}-{match.team2_points}"
+        if prev is None:
+            from app.models.team import Team as TeamModel
+            t1 = db.query(TeamModel).filter(TeamModel.id == match.team1_id).first()
+            t2 = db.query(TeamModel).filter(TeamModel.id == match.team2_id).first()
+            if t1 and t2:
+                t1.total_points = (t1.total_points or 0) + (match.team1_points or 0)
+                t2.total_points = (t2.total_points or 0) + (match.team2_points or 0)
+        db.commit()
+    return match.winner_team_id
+
+
 @router.get("/", response_model=list[MatchSchema])
 @router.get("", response_model=list[MatchSchema])
 def list_matches(db: Session = Depends(get_db)):
@@ -23,6 +51,7 @@ def list_matches(db: Session = Depends(get_db)):
     )
     results: list[MatchSchema] = []
     for m in items:
+        winner_id = _heal_winner(m, db)
         results.append(MatchSchema(
             id=m.id,
             court=m.court,
@@ -33,7 +62,7 @@ def list_matches(db: Session = Depends(get_db)):
             team2_id=m.team2_id,
             team1_player_id=m.team1_player_id,
             team2_player_id=m.team2_player_id,
-            winner_team_id=m.winner_team_id,
+            winner_team_id=winner_id,
             score_summary=m.score_summary,
             games=m.games,
         ))
@@ -92,7 +121,14 @@ def create_match(match: MatchSchema, db: Session = Depends(get_db)):
     return db_match
 
 @router.post("/{match_id}/update/{game_number}")
-def update_score(match_id: int, game_number: int, team1_score: int, team2_score: int, db: Session = Depends(get_db)):
+def update_score(
+    match_id: int,
+    game_number: int,
+    team1_score: int,
+    team2_score: int,
+    rally_data: str | None = None,
+    db: Session = Depends(get_db),
+):
     match = db.query(MatchModel).filter(MatchModel.id == match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
@@ -103,7 +139,12 @@ def update_score(match_id: int, game_number: int, team1_score: int, team2_score:
 
     game.team1_score = team1_score
     game.team2_score = team2_score
+    if rally_data is not None:
+        game.rally_data = rally_data
     db.commit()
+
+    # Remember whether the match already had a winner BEFORE we recalc
+    prev_winner_id = match.winner_team_id
 
     # 승자 판정
     match.winner_team_id = check_winner(match)
@@ -114,14 +155,37 @@ def update_score(match_id: int, game_number: int, team1_score: int, team2_score:
     match.team1_points, match.team2_points = pts
     match.score_summary = f"{match.team1_points}-{match.team2_points}"
 
-    # 팀 누적 점수 업데이트
-    if match.winner_team_id:
+    # 팀 누적 점수 업데이트 — only on the first transition to "has winner".
+    # Without this guard, posting scores after match-end (or simply persisting
+    # every point) would re-add this match's points each call.
+    if match.winner_team_id and prev_winner_id is None:
         from app.models.team import Team as TeamModel
         team1 = db.query(TeamModel).filter(TeamModel.id == match.team1_id).first()
         team2 = db.query(TeamModel).filter(TeamModel.id == match.team2_id).first()
         if team1 and team2:
             team1.total_points = (team1.total_points or 0) + (match.team1_points or 0)
             team2.total_points = (team2.total_points or 0) + (match.team2_points or 0)
+
+        # Referee bonus: each unique referee contributes +1 to their team's total.
+        # Cap of "1 per referee per match" is enforced by deduplicating user_ids
+        # across both the legacy single referee_id and the referees relation.
+        ref_user_ids = set()
+        if match.referee_id:
+            ref_user_ids.add(match.referee_id)
+        for mr in db.query(MatchReferee).filter(MatchReferee.match_id == match.id).all():
+            if mr.user_id:
+                ref_user_ids.add(mr.user_id)
+
+        if ref_user_ids:
+            ref_users = db.query(UserModel).filter(UserModel.id.in_(ref_user_ids)).all()
+            bonus_by_team: dict[int, int] = {}
+            for ru in ref_users:
+                if ru.team_id is not None:
+                    bonus_by_team[ru.team_id] = bonus_by_team.get(ru.team_id, 0) + 1
+            for tid, bonus in bonus_by_team.items():
+                t = db.query(TeamModel).filter(TeamModel.id == tid).first()
+                if t:
+                    t.total_points = (t.total_points or 0) + bonus
 
     db.commit()
     db.refresh(match)
@@ -140,6 +204,7 @@ def get_match(match_id: int, db: Session = Depends(get_db)):
     )
     if not m:
         raise HTTPException(status_code=404, detail="Match not found")
+    winner_id = _heal_winner(m, db)
     return MatchSchema(
         id=m.id,
         court=m.court,
@@ -150,7 +215,7 @@ def get_match(match_id: int, db: Session = Depends(get_db)):
         team2_id=m.team2_id,
         team1_player_id=m.team1_player_id,
         team2_player_id=m.team2_player_id,
-        winner_team_id=m.winner_team_id,
+        winner_team_id=winner_id,
         score_summary=m.score_summary,
         games=m.games,
     )

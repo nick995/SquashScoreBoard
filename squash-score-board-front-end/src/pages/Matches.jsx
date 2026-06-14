@@ -1,249 +1,234 @@
 import { useEffect, useMemo, useState } from "react";
 import client from "../../api/client";
 import { Link, useNavigate } from "react-router-dom";
-import "./matches.css"; 
+import MatchCreateForm from "../components/MatchCreateForm";
+import "./matches.css";
 
 export default function Matches() {
   const [matches, setMatches] = useState([]);
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
-  const [form, setForm] = useState({ court: "", order: 1, referee_ids: [], team1_id: "", team2_id: "", team1_player_id: "", team2_player_id: "" });
-  const [refQ, setRefQ] = useState("");
-  const [refOptions, setRefOptions] = useState([]);
-  const [refLoading, setRefLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all"); // all | live | completed
+  const [showCreate, setShowCreate] = useState(false);
   const navigate = useNavigate();
-  const [allowSub1, setAllowSub1] = useState(false);
-  const [allowSub2, setAllowSub2] = useState(false);
-
-  const load = async () => {
-    // Load endpoints independently so one failure doesn't block others
-    try {
-      const t = await client.get("/teams");
-      setTeams(Array.isArray(t.data) ? t.data : []);
-    } catch (e) {
-      console.error("Failed to load teams", e);
-      setTeams([]);
-    }
-    try {
-      const u = await client.get("/users");
-      setUsers(Array.isArray(u.data) ? u.data : []);
-    } catch (e) {
-      console.error("Failed to load users", e);
-      setUsers([]);
-    }
-    try {
-      const m = await client.get("/matches");
-      setMatches(Array.isArray(m.data) ? m.data : []);
-    } catch (e) {
-      console.warn("Matches endpoint not ready; continuing", e?.response?.status);
-      setMatches([]);
-    }
-  };
 
   useEffect(() => {
-    load().catch(console.error);
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      client.get("/teams"),
+      client.get("/users"),
+      client.get("/matches"),
+    ])
+      .then(([t, u, m]) => {
+        if (cancelled) return;
+        setTeams(Array.isArray(t.data) ? t.data : []);
+        setUsers(Array.isArray(u.data) ? u.data : []);
+        setMatches(Array.isArray(m.data) ? m.data : []);
+      })
+      .catch((err) => {
+        console.error(err);
+        if (!cancelled) {
+          setTeams([]);
+          setUsers([]);
+          setMatches([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Pairing generator removed
+  const teamName = (tid) =>
+    teams.find((t) => Number(t.id) === Number(tid))?.name || `Team ${tid}`;
+  const userById = (uid) => users.find((u) => Number(u.id) === Number(uid));
 
-  // Referee search by name
-  useEffect(() => {
-    if (!refQ.trim()) { setRefOptions([]); return; }
-    const t = setTimeout(async () => {
-      setRefLoading(true);
-      try {
-        const res = await client.get("/users/search/", { params: { name: refQ } });
-        setRefOptions(Array.isArray(res.data) ? res.data : []);
-      } catch (e) {
-        console.error("Failed to search referees", e);
-        setRefOptions([]);
-      } finally { setRefLoading(false); }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [refQ]);
+  const hasScore = (m) =>
+    m.games && m.games.some((g) => (g.team1_score ?? 0) > 0 || (g.team2_score ?? 0) > 0);
 
-  const addRef = (uid) => {
-    const id = Number(uid);
-    if (!id) return;
-    if ((form.referee_ids || []).some(x => Number(x) === id)) return;
-    setForm(f => ({ ...f, referee_ids: [...(f.referee_ids||[]), id] }));
+  const getStatus = (m) => {
+    if (m.winner_team_id) return "completed";
+    if (hasScore(m)) return "live";
+    return "pending";
   };
 
-  const removeRef = (uid) => {
-    setForm(f => ({ ...f, referee_ids: (f.referee_ids||[]).filter(x => Number(x) !== Number(uid)) }));
-  };
-
-  const nameById = (uid) => {
-    const u = users.find(x => Number(x.id) === Number(uid)) || refOptions.find(x => Number(x.id) === Number(uid));
-    return u ? u.name : `#${uid}`;
-  };
-
-  const teamMembers = (teamId) => users.filter(u => String(u.team_id ?? "") === String(teamId ?? ""));
-  const playersFor = (teamId, allowSub) => allowSub ? users : teamMembers(teamId);
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    try {
-      const t1 = Number(form.team1_id);
-      const t2 = Number(form.team2_id);
-      if (!t1 || !t2 || t1 === t2) { alert("Pick two different teams"); return; }
-      if (!allowSub1 && form.team1_player_id && !teamMembers(t1).some(u => Number(u.id) === Number(form.team1_player_id))) {
-        alert("Team 1 Player must belong to Team 1");
-        return;
-      }
-      if (!allowSub2 && form.team2_player_id && !teamMembers(t2).some(u => Number(u.id) === Number(form.team2_player_id))) {
-        alert("Team 2 Player must belong to Team 2");
-        return;
-      }
-      const payload = {
-        court: form.court || null,
-        order: form.order ? Number(form.order) : null,
-        referee_ids: (form.referee_ids || []).map(n => Number(n)),
-        team1_id: t1,
-        team2_id: t2,
-        team1_player_id: form.team1_player_id ? Number(form.team1_player_id) : null,
-        team2_player_id: form.team2_player_id ? Number(form.team2_player_id) : null,
-      };
-      const res = await client.post("/matches/", payload);
-      setMatches(prev => [res.data, ...prev]);
-      navigate(`/matches/${res.data.id}`);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to create match");
+  const gameWins = (m) => {
+    if (!m.games) return [0, 0];
+    let w1 = 0, w2 = 0;
+    for (const g of m.games) {
+      if ((g.team1_score ?? 0) > (g.team2_score ?? 0) && (g.team1_score ?? 0) >= 11) w1++;
+      else if ((g.team2_score ?? 0) > (g.team1_score ?? 0) && (g.team2_score ?? 0) >= 11) w2++;
     }
+    return [w1, w2];
   };
 
-  const recent = useMemo(() => [...matches].sort((a,b)=>b.id-a.id).slice(0,10), [matches]);
-  const teamName = (tid) => teams.find(t => Number(t.id) === Number(tid))?.name || `Team ${tid}`;
-  const userById = (uid) => users.find(u => Number(u.id) === Number(uid));
-  const userLabel = (uid, fallbackTeamId, order) => {
-    const u = userById(uid);
-    if (u) return `${u.name} #${u.player_number}`;
-    return `${teamName(fallbackTeamId)} #${order ?? '-'}`;
-  };
+  const filtered = useMemo(() => {
+    const sorted = [...matches].sort((a, b) => b.id - a.id);
+    if (filter === "all") return sorted;
+    return sorted.filter((m) => getStatus(m) === filter);
+  }, [matches, filter]);
+
+  const counts = useMemo(() => {
+    let live = 0, completed = 0, pending = 0;
+    for (const m of matches) {
+      const s = getStatus(m);
+      if (s === "live") live++;
+      else if (s === "completed") completed++;
+      else pending++;
+    }
+    return { total: matches.length, live, completed, pending };
+  }, [matches]);
 
   return (
-    <div className="grid matches-page">
-      {/* Pairing generator removed */}
-
-      <div className="card">
-        <h2>Create Match</h2>
-        <form onSubmit={handleCreate} className="grid" style={{gap:12}}>
-          <div className="form-row">
-            <div>
-              <label className="label">Court</label>
-              <input className="input" value={form.court} onChange={e=>setForm({...form, court:e.target.value})} placeholder="e.g. Court 1" />
-            </div>
-            <div>
-              <label className="label">Order</label>
-              <input className="input" type="number" min={1} max={4} value={form.order} onChange={e=>setForm({...form, order:e.target.value})} />
-            </div>
-          </div>
-          <div className="form-row">
-            <div>
-              <label className="label">Team 1</label>
-              <select className="select" value={form.team1_id} onChange={e=>setForm({...form, team1_id:e.target.value, team1_player_id:""})} required>
-                <option value="">Select team</option>
-                {teams.map(t=> <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">Team 2</label>
-              <select className="select" value={form.team2_id} onChange={e=>setForm({...form, team2_id:e.target.value, team2_player_id:""})} required>
-                <option value="">Select team</option>
-                {teams.map(t=> <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="form-row">
-            <div>
-              <label className="label">Team 1 Player</label>
-              <select className="select" value={form.team1_player_id} onChange={e=>setForm({...form, team1_player_id:e.target.value})}>
-                <option value="">Select player</option>
-                {playersFor(form.team1_id, allowSub1).map(u=> <option key={u.id} value={u.id}>{u.name} #{u.player_number}{u.team_id? ` • T${u.team_id}`:''}</option>)}
-              </select>
-              <label style={{display:'flex', alignItems:'center', gap:6, marginTop:6}}>
-                <input type="checkbox" checked={allowSub1} onChange={e=>setAllowSub1(e.target.checked)} />
-                <span className="muted" style={{fontSize:12}}>Substitute (allow any player)</span>
-              </label>
-            </div>
-            <div>
-              <label className="label">Team 2 Player</label>
-              <select className="select" value={form.team2_player_id} onChange={e=>setForm({...form, team2_player_id:e.target.value})}>
-                <option value="">Select player</option>
-                {playersFor(form.team2_id, allowSub2).map(u=> <option key={u.id} value={u.id}>{u.name} #{u.player_number}{u.team_id? ` • T${u.team_id}`:''}</option>)}
-              </select>
-              <label style={{display:'flex', alignItems:'center', gap:6, marginTop:6}}>
-                <input type="checkbox" checked={allowSub2} onChange={e=>setAllowSub2(e.target.checked)} />
-                <span className="muted" style={{fontSize:12}}>Substitute (allow any player)</span>
-              </label>
-            </div>
-          </div>
-          <div className="muted" style={{fontSize:12}}>
-            Players list only shows users currently assigned to the selected team.
-          </div>
-          <div>
-            <label className="label">Referees</label>
-            <input className="input" placeholder="Search a user by name" value={refQ} onChange={e=>setRefQ(e.target.value)} />
-            <div style={{display:'flex', gap:8, flexWrap:'wrap', marginTop:8}}>
-              {(form.referee_ids||[]).map(uid => (
-                <span key={uid} className="tag" style={{display:'inline-flex', alignItems:'center', gap:8}}>
-                  {nameById(uid)}
-                  <button type="button" onClick={()=>removeRef(uid)} style={{border:'none', background:'transparent', cursor:'pointer', color:'var(--muted)'}}>×</button>
-                </span>
-              ))}
-              {(!form.referee_ids || form.referee_ids.length===0) && (
-                <span className="muted" style={{fontSize:12}}>No referees yet. Search above to add.</span>
-              )}
-            </div>
-            {refQ && (
-              <div className="card" style={{marginTop:8}}>
-                <div className="muted" style={{fontSize:12, marginBottom:6}}>{refLoading ? 'Searching…' : 'Results'}</div>
-                {refOptions.length === 0 && !refLoading ? (
-                  <div className="muted" style={{fontSize:13}}>No users found</div>
-                ) : (
-                  <ul className="ref-results">
-                    {refOptions.map(u => (
-                      <li key={u.id} className="ref-row">
-                        <div className="truncate">{u.name}{u.player_number ? ` #${u.player_number}` : ''} <span className="muted" style={{fontSize:12}}>{u.team_id ? `• team ${u.team_id}` : ''}</span></div>
-                        <button type="button" className="btn" onClick={()=>addRef(u.id)}>Add</button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-            <div className="muted" style={{fontSize:12, marginTop:6}}>Referees can be any user. Use search to add multiple.</div>
-          </div>
-          <div>
-            <button className="btn btn-primary" type="submit">Create & Start</button>
-          </div>
-        </form>
+    <div className="matches-page">
+      <div className="matches-header">
+        <div>
+          <div className="kicker">Matches</div>
+          <h1 className="gradient-text" style={{ margin: "8px 0 0" }}>All Matches</h1>
+        </div>
+        <div className="matches-stats">
+          <span className="stat-pill"><strong>{counts.total}</strong> total</span>
+          <span className="stat-pill"><strong>{counts.live}</strong> live</span>
+          <span className="stat-pill"><strong>{counts.completed}</strong> completed</span>
+          <span className="stat-pill"><strong>{counts.pending}</strong> pending</span>
+        </div>
       </div>
 
-      <div className="card">
-        <h2>Recent Matches</h2>
-        {recent.length === 0 ? (
-          <p className="muted">No matches yet. {teams.length === 0 ? "Create teams first on the Teams page." : "Create one above."}</p>
-        ) : (
-          <ul style={{margin:0, padding:0, listStyle:'none'}}>
-            {recent.map(m => (
-              <li key={m.id} className="recent-row">
-                <div className="recent-main">
-                  <div className="recent-title" style={{fontWeight:600}}>#{m.order ?? '-'} {userLabel(m.team1_player_id, m.team1_id, m.order)} vs {userLabel(m.team2_player_id, m.team2_id, m.order)}</div>
-                  <div className="muted">
-                    Match #{m.id} {m.court ? `• ${m.court}` : ''} • {teamName(m.team1_id)} vs {teamName(m.team2_id)} {m.score_summary ? `• ${m.score_summary}` : ''}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button
+          type="button"
+          className={`btn ${showCreate ? "" : "btn-primary"}`}
+          style={{ width: "auto" }}
+          onClick={() => setShowCreate((v) => !v)}
+        >
+          {showCreate ? "Cancel" : "+ New Match"}
+        </button>
+      </div>
+
+      {showCreate && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Create Match</h2>
+          <MatchCreateForm
+            onCreated={(m) => navigate(`/matches/${m.id}/scoreboard`)}
+          />
+        </div>
+      )}
+
+      <div className="matches-filter">
+        <div className="seg-group" role="tablist">
+          {["all", "live", "completed", "pending"].map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={`seg ${filter === k ? "active" : ""}`}
+              onClick={() => setFilter(k)}
+            >
+              {k[0].toUpperCase() + k.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="empty-state"><h3>Loading…</h3></div>
+      ) : filtered.length === 0 ? (
+        <div className="empty-state">
+          <h3>No matches</h3>
+          <p>{filter === "all" ? "No matches yet." : `No ${filter} matches.`}</p>
+        </div>
+      ) : (
+        <div className="match-grid">
+          {filtered.map((m) => {
+            const status = getStatus(m);
+            const u1 = userById(m.team1_player_id);
+            const u2 = userById(m.team2_player_id);
+            const [w1, w2] = gameWins(m);
+            const winner1 = m.winner_team_id && m.winner_team_id === m.team1_id;
+            const winner2 = m.winner_team_id && m.winner_team_id === m.team2_id;
+            const cardCls = `match-card ${status === "completed" ? "is-completed" : ""} ${status === "live" ? "is-live" : ""}`;
+
+            return (
+              <article key={m.id} className={cardCls}>
+                <div className="match-meta">
+                  <div className="match-meta-left">
+                    <span className="badge badge-pending">
+                      {m.order ? `#${m.order}` : `#${m.id}`}
+                    </span>
+                    {m.court && (
+                      <span className="badge badge-pending">{m.court}</span>
+                    )}
+                  </div>
+                  {status === "live" && (
+                    <span className="badge badge-live">
+                      <span className="dot"></span> Live
+                    </span>
+                  )}
+                  {status === "completed" && (
+                    <span className="badge badge-done">Final</span>
+                  )}
+                  {status === "pending" && (
+                    <span className="badge badge-pending">Scheduled</span>
+                  )}
+                </div>
+
+                <div className="match-body">
+                  <div className={`team-side left ${winner1 ? "is-winner" : ""} ${winner2 ? "is-loser" : ""}`}>
+                    <div className="team-label">{teamName(m.team1_id)}</div>
+                    <div className="player-name">
+                      {u1 ? u1.name : `Team ${m.team1_id} #${m.order ?? "-"}`}
+                    </div>
+                    <div className="player-tier">
+                      {u1 ? `Tier ${u1.player_number}` : "—"}
+                    </div>
+                  </div>
+
+                  <div className="match-score">
+                    {status === "pending" ? (
+                      <span className="pending">vs</span>
+                    ) : (
+                      <>
+                        <span className="vs">SCORE</span>
+                        <span className="score">
+                          <span className={`s1 ${winner1 ? "win" : winner2 ? "lose" : ""}`}>
+                            {w1}
+                          </span>
+                          <span className="sep">–</span>
+                          <span className={`s2 ${winner2 ? "win" : winner1 ? "lose" : ""}`}>
+                            {w2}
+                          </span>
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  <div className={`team-side right ${winner2 ? "is-winner" : ""} ${winner1 ? "is-loser" : ""}`}>
+                    <div className="team-label">{teamName(m.team2_id)}</div>
+                    <div className="player-name">
+                      {u2 ? u2.name : `Team ${m.team2_id} #${m.order ?? "-"}`}
+                    </div>
+                    <div className="player-tier">
+                      {u2 ? `Tier ${u2.player_number}` : "—"}
+                    </div>
                   </div>
                 </div>
-                <div className="recent-actions">
-                  <Link className="btn" to={`/matches/${m.id}`}>Details</Link>
-                  <Link className="btn btn-primary" to={`/matches/${m.id}/scoreboard`}>Score</Link>
+
+                <div className="match-actions">
+                  <Link
+                    className="btn btn-primary btn-sm"
+                    to={`/matches/${m.id}/scoreboard`}
+                  >
+                    {status === "completed" ? "View Score" : "Score"}
+                  </Link>
                 </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

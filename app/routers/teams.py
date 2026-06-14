@@ -7,6 +7,12 @@ from app.schemas.team import Team as TeamSchema, AddUserToTeam, TeamCreate, Team
 
 router = APIRouter(prefix="/teams", tags=["Teams"])
 
+MAX_TEAM_PLAYERS = 4
+
+
+def _team_member_count(db: Session, team_id: int) -> int:
+    return db.query(UserModel).filter(UserModel.team_id == team_id).count()
+
 @router.post("/", response_model=TeamSchema)
 @router.post("", response_model=TeamSchema)
 def create_team(team: TeamCreate, db: Session = Depends(get_db)):
@@ -34,6 +40,8 @@ def add_user_to_team(team_id: int, payload: AddUserToTeam, db: Session = Depends
         raise HTTPException(status_code=400, detail="User already in this team")
     if db_user.team_id is not None and db_user.team_id != team_id:
         raise HTTPException(status_code=400, detail="User belongs to another team")
+    if _team_member_count(db, team_id) >= MAX_TEAM_PLAYERS:
+        raise HTTPException(status_code=400, detail=f"Team is full (max {MAX_TEAM_PLAYERS} players)")
 
     db_user.team_id = team_id
     db.commit()
@@ -55,6 +63,8 @@ def add_user_to_team_by_name(team_id: int, name: str, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="User already in this team")
     if db_user.team_id is not None and db_user.team_id != team_id:
         raise HTTPException(status_code=400, detail="User belongs to another team")
+    if _team_member_count(db, team_id) >= MAX_TEAM_PLAYERS:
+        raise HTTPException(status_code=400, detail=f"Team is full (max {MAX_TEAM_PLAYERS} players)")
 
     db_user.team_id = team_id
     db.commit()

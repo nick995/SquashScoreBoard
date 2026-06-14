@@ -1,105 +1,136 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import client from "../../api/client";
 
 export default function Users() {
   const [users, setUsers] = useState([]);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [playerNumber, setPlayerNumber] = useState(1);
-  const [playerPhone, setPlayerPhone] = useState("");
-  const [teamId, setTeamId] = useState("");
+  const [matches, setMatches] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [searching, setSearching] = useState(false);
-
-  const loadUsers = async () => {
-    const res = await client.get("/users");
-    setUsers(res.data);
-  };
 
   useEffect(() => {
-    loadUsers().catch(console.error);
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([client.get("/users"), client.get("/matches")])
+      .then(([uRes, mRes]) => {
+        if (cancelled) return;
+        setUsers(Array.isArray(uRes.data) ? uRes.data : []);
+        setMatches(Array.isArray(mRes.data) ? mRes.data : []);
+      })
+      .catch((err) => {
+        console.error(err);
+        if (!cancelled) {
+          setUsers([]);
+          setMatches([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    try {
-      const payload = {
-        name: name.trim(),
-        email: email || null,
-        player_number: Number(playerNumber),
-        player_phone_number: playerPhone || null,
-        team_id: teamId ? Number(teamId) : null,
-      };
-      const res = await client.post("/users/", payload);
-      setUsers((prev) => [...prev, res.data]);
-      setName("");
-      setEmail("");
-      setPlayerNumber(1);
-      setPlayerPhone("");
-      setTeamId("");
-    } catch (err) {
-      console.error(err);
-      alert("Failed to create user");
-    }
-  };
-
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    setSearching(true);
-    try {
-      if (!q.trim()) {
-        await loadUsers();
-      } else {
-        const res = await client.get(`/users/search/`, { params: { name: q } });
-        setUsers(res.data);
+  // Compute win/loss stats per user from finished matches (winner_team_id set)
+  const statsByUserId = useMemo(() => {
+    const stats = new Map();
+    const bump = (uid, key) => {
+      if (uid == null) return;
+      const cur = stats.get(uid) || { wins: 0, losses: 0 };
+      cur[key] += 1;
+      stats.set(uid, cur);
+    };
+    for (const m of matches) {
+      if (m.winner_team_id == null) continue;
+      const t1Won = m.winner_team_id === m.team1_id;
+      const t2Won = m.winner_team_id === m.team2_id;
+      if (t1Won) {
+        bump(m.team1_player_id, "wins");
+        bump(m.team2_player_id, "losses");
+      } else if (t2Won) {
+        bump(m.team2_player_id, "wins");
+        bump(m.team1_player_id, "losses");
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSearching(false);
     }
-  };
+    return stats;
+  }, [matches]);
 
-  const sorted = useMemo(
-    () => [...users].sort((a, b) => a.id - b.id),
-    [users]
-  );
+  const filtered = useMemo(() => {
+    const list = q.trim()
+      ? users.filter((u) =>
+          u.name.toLowerCase().includes(q.trim().toLowerCase())
+        )
+      : users;
+    return [...list].sort((a, b) => {
+      const sa = statsByUserId.get(a.id) || { wins: 0, losses: 0 };
+      const sb = statsByUserId.get(b.id) || { wins: 0, losses: 0 };
+      const ratea = sa.wins + sa.losses ? sa.wins / (sa.wins + sa.losses) : -1;
+      const rateb = sb.wins + sb.losses ? sb.wins / (sb.wins + sb.losses) : -1;
+      if (rateb !== ratea) return rateb - ratea;
+      return a.id - b.id;
+    });
+  }, [users, q, statsByUserId]);
+
+  const formatRate = (s) => {
+    const total = s.wins + s.losses;
+    if (total === 0) return "—";
+    return `${Math.round((s.wins / total) * 100)}%`;
+  };
 
   return (
     <div className="grid">
       <div className="card">
-        <h2>Create User</h2>
-        <form onSubmit={handleCreate} className="form-row">
-          <input className="input" placeholder="Name" value={name} onChange={(e)=>setName(e.target.value)} required />
-          <input className="input" placeholder="Email (optional)" value={email} onChange={(e)=>setEmail(e.target.value)} />
-          <input className="input" type="number" min={1} max={4} placeholder="Player Number (1-4)" value={playerNumber} onChange={(e)=>setPlayerNumber(e.target.value)} required />
-          <input className="input" placeholder="Phone (optional)" value={playerPhone} onChange={(e)=>setPlayerPhone(e.target.value)} />
-          <input className="input" type="number" placeholder="Team ID (optional)" value={teamId} onChange={(e)=>setTeamId(e.target.value)} />
-          <div>
-            <button className="btn btn-primary">Add User</button>
-          </div>
-        </form>
-      </div>
-
-      <div className="card">
-        <form onSubmit={handleSearch} style={{display:'flex', gap:12, marginBottom:12}}>
-          <input className="input" placeholder="Search by name" value={q} onChange={(e)=>setQ(e.target.value)} />
-          <button className="btn" disabled={searching}>{searching ? "Searching..." : "Search"}</button>
-        </form>
-        <h2>Users</h2>
-        {sorted.length === 0 ? (
+        <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+          <input
+            className="input"
+            placeholder="Search by name"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <h2 style={{ marginTop: 0 }}>Players & Win Rates</h2>
+        {loading ? (
+          <p className="muted">Loading…</p>
+        ) : filtered.length === 0 ? (
           <p className="muted">No users.</p>
         ) : (
-          <ul style={{margin:0, padding:0, listStyle:'none'}}>
-            {sorted.map(u => (
-              <li key={u.id} style={{display:'flex', alignItems:'baseline', justifyContent:'space-between', padding:'10px 0', borderBottom:'1px solid var(--border)'}}>
-                <div>
-                  <div style={{fontWeight:600}}>{u.name} <span className="muted">#{u.player_number}</span></div>
-                  <div className="muted" style={{fontSize:13}}>id: {u.id}{u.team_id ? ` • team: ${u.team_id}` : ""}</div>
-                </div>
-                {u.email && <div className="muted" style={{fontSize:13}}>{u.email}</div>}
-              </li>
-            ))}
+          <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+            {filtered.map((u) => {
+              const s = statsByUserId.get(u.id) || { wins: 0, losses: 0 };
+              const total = s.wins + s.losses;
+              return (
+                <li
+                  key={u.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "10px 0",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600 }}>
+                      <Link to={`/users/${u.id}`} className="link">{u.name}</Link>{" "}
+                      <span className="muted">Tier {u.player_number}</span>
+                    </div>
+                    <div className="muted" style={{ fontSize: 13 }}>
+                      {u.team_id ? `team: ${u.team_id}` : "no team"}
+                      {u.email ? ` • ${u.email}` : ""}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 700 }}>{formatRate(s)}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {s.wins}W · {s.losses}L
+                      {total === 0 ? " · no matches" : ""}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
